@@ -110,6 +110,12 @@ mod tests {
     }
 
     #[test]
+    fn css_comments() {
+        assert_eq!(hidden("a.css", "a {\n  /* tvlint-ignore-next-line: legacy */\n  float: left;\n  float: right;\n}\n"), [3]);
+        assert!(scan("a.css", "/* tvlint-ignore-file */\na {}\n").ignore_file);
+    }
+
+    #[test]
     fn shell_comments() {
         assert_eq!(hidden("a.sh", "#!/bin/sh\n# tvlint-ignore-next-line: ok\nrm -rf x\nrm -rf y\n"), [3]);
         assert!(scan("a.sh", "# tvlint-ignore-file\nls\n").ignore_file);

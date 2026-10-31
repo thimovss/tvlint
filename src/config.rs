@@ -47,6 +47,7 @@ pub enum Language {
     Go,
     Html,
     Shell,
+    Css,
     Json,
     Yaml,
     Toml,
@@ -61,6 +62,7 @@ impl Language {
         Language::Go,
         Language::Html,
         Language::Shell,
+        Language::Css,
         Language::Json,
         Language::Yaml,
         Language::Toml,
@@ -80,6 +82,7 @@ impl Language {
             Language::Go => "go",
             Language::Html => "html",
             Language::Shell => "shell",
+            Language::Css => "css",
             Language::Json => "json",
             Language::Yaml => "yaml",
             Language::Toml => "toml",
@@ -95,6 +98,9 @@ impl Language {
         use Language::*;
         if self.is_data() {
             return matches!(key, "forbid_property" | "property_value" | "require_property" | "same_keys_as" | "same_placeholders");
+        }
+        if self == Css {
+            return matches!(key, "forbid_call" | "forbid_import" | "except_import" | "forbid_property" | "literal_argument" | "require_filename");
         }
         if self == Html {
             return matches!(key, "forbid_element" | "forbid_property" | "property_value" | "require_filename");
@@ -117,6 +123,7 @@ impl Language {
             return "JSON, YAML and TOML files are checked by key path: use forbid_property, require_property, property_value, same_keys_as";
         }
         match (self, key) {
+            (Language::Css, _) => "CSS supports forbid_call (functions such as `rgb`), forbid_import (`@import`) and forbid_property (declaration names)",
             (Language::Html, _) => "HTML supports forbid_element (tag names), forbid_property (attribute names) and property_value (attribute values)",
             (_, "require_property" | "same_keys_as" | "same_placeholders") => "these checks read JSON, YAML and TOML files",
             (Language::Rust, "forbid_raise") => {
@@ -138,6 +145,7 @@ impl Language {
             "go" => Some(Language::Go),
             "html" | "htm" => Some(Language::Html),
             "sh" | "bash" => Some(Language::Shell),
+            "css" => Some(Language::Css),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "json" | "jsonc" => Some(Language::Json),

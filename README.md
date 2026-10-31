@@ -107,11 +107,12 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `go` | `.go` |
 | `html` | `.html`, `.htm` |
 | `shell` | `.sh`, `.bash` |
+| `css` | `.css` |
 | `json` | `.json`, `.jsonc` |
 | `yaml` | `.yaml`, `.yml` |
 | `toml` | `.toml` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have object-literal checks. HTML is markup, so it has no calls or imports: it supports `forbid_element` (tag names, case-insensitive), `forbid_property` (attribute names) and `property_value` with `forbid_literal` (attributes that carry a value), plus `require_filename`. Code inside `<script>` and `<style>` is not parsed. Shell scripts have commands and `source`: `forbid_call` matches the command name as written (`curl`, `sudo`, `./deploy.sh`; a name built from an expansion such as `$CMD` is `?`), `forbid_import` matches the file given to `source` or `.`, and `literal_argument` reads a command's words. Only bare and quoted words without expansions have a value; shell has no `forbid_raise`. `tvl validate` says so when a rule asks a language for something it cannot do.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have object-literal checks. HTML is markup, so it has no calls or imports: it supports `forbid_element` (tag names, case-insensitive), `forbid_property` (attribute names) and `property_value` with `forbid_literal` (attributes that carry a value), plus `require_filename`. Code inside `<script>` and `<style>` is not parsed. Shell scripts have commands and `source`: `forbid_call` matches the command name as written (`curl`, `sudo`, `./deploy.sh`; a name built from an expansion such as `$CMD` is `?`), `forbid_import` matches the file given to `source` or `.`, and `literal_argument` reads a command's words. Only bare and quoted words without expansions have a value; shell has no `forbid_raise`. CSS supports `forbid_call` (functions in values, lowercased: `rgb`, `calc`, `url`), `forbid_import` (`@import`; a bare name is relative to the stylesheet, a URL stays as written) and `forbid_property` (declaration names such as `float`; custom properties keep their case). Selectors, `!important` and declaration values are not checked. `tvl validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 
@@ -175,7 +176,7 @@ raise ValueError("not found")
 // tvlint-ignore-file: generated code
 ```
 
-- Use the comment style of the language: `#` in Python and shell; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX; `<!-- -->` in HTML.
+- Use the comment style of the language: `#` in Python and shell; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX; `<!-- -->` in HTML; `/* */` in CSS.
 - The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
 - **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvlint-ignore-next-line`) hides the next line, not its own.
 - **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Every language can carry it, but a shell script's shebang already takes line 1, so use `tvlint-ignore-next-line` there.

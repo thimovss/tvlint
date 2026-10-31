@@ -38,13 +38,13 @@
 
     "language": {
       "description": "A language a rule can apply to. Code languages are parsed; JSON, YAML and TOML are data files checked by key path.",
-      "enum": ["python", "javascript", "typescript", "rust", "go", "html", "shell", "json", "yaml", "toml"]
+      "enum": ["python", "javascript", "typescript", "rust", "go", "html", "shell", "css", "json", "yaml", "toml"]
     },
     "languages": {
-      "description": "`python`, `javascript`, `typescript`, `rust`, `go`, `html`, `shell`, `json`, `yaml` or `toml`, or a list of them. Code languages and data languages cannot share a rule.",
+      "description": "`python`, `javascript`, `typescript`, `rust`, `go`, `html`, `shell`, `css`, `json`, `yaml` or `toml`, or a list of them. Code languages and data languages cannot share a rule.",
       "anyOf": [
         { "$ref": "#/$defs/language" },
-        { "type": "array", "minItems": 1, "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "html", "shell"] } },
+        { "type": "array", "minItems": 1, "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "html", "shell", "css"] } },
         { "type": "array", "minItems": 1, "items": { "enum": ["json", "yaml", "toml"] } }
       ]
     },
@@ -61,15 +61,15 @@
     },
     "onlyCode": {
       "anyOf": [
-        { "enum": ["python", "javascript", "typescript", "rust", "go", "shell"] },
-        { "type": "array", "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "shell"] } }
+        { "enum": ["python", "javascript", "typescript", "rust", "go", "shell", "css"] },
+        { "type": "array", "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "shell", "css"] } }
       ]
     },
     "onlyImporting": {
       "description": "Languages whose imports TVLint reads.",
       "anyOf": [
-        { "enum": ["javascript", "typescript", "rust", "go", "shell"] },
-        { "type": "array", "items": { "enum": ["javascript", "typescript", "rust", "go", "shell"] } }
+        { "enum": ["javascript", "typescript", "rust", "go", "shell", "css"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "rust", "go", "shell", "css"] } }
       ]
     },
     "onlyElements": {
@@ -88,8 +88,8 @@
     "onlyObjectLiterals": {
       "description": "JavaScript and TypeScript object literals, HTML attributes, and the key paths of data files.",
       "anyOf": [
-        { "enum": ["javascript", "typescript", "html", "json", "yaml", "toml"] },
-        { "type": "array", "items": { "enum": ["javascript", "typescript", "html", "json", "yaml", "toml"] } }
+        { "enum": ["javascript", "typescript", "html", "css", "json", "yaml", "toml"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "html", "css", "json", "yaml", "toml"] } }
       ]
     },
     "onlyData": {

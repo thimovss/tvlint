@@ -1135,6 +1135,37 @@ useQuery({ queryKey: [...base, accountID] });\n";
         );
     }
 
+    // ---- CSS
+
+    fn css_rule() -> Rule {
+        Rule { language: vec![Language::Css], ..empty_rule() }
+    }
+
+    const CSS: &str = "@import \"a.css\";\n@import url(lib/b.css) screen;\n@import url(\"https://x.test/c.css\");\n\
+.a > b:hover { FLOAT: left !important; --float: 1; color: RGB(1,2,3); background: url(x.png); }\n\
+@media (min-width: 1px) { a { margin: calc(1px + 2px) } }\n";
+
+    #[test]
+    fn css_functions_and_declarations() {
+        let calls = Rule { forbid_call: vec!["rgb".into(), "calc".into()], ..css_rule() };
+        assert_eq!(lines("a.css", CSS, &calls), [4, 5]);
+        let props = Rule { forbid_property: vec!["float".into()], ..css_rule() };
+        assert_eq!(lines("a.css", CSS, &props), [4]);
+    }
+
+    #[test]
+    fn css_imports_are_resolved_against_the_stylesheet() {
+        let found = imports("styles/app.css", CSS, &["**"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `a.css` (styles/a.css) is forbidden",
+                "importing `lib/b.css` (styles/lib/b.css) is forbidden",
+                "importing `https://x.test/c.css` is forbidden",
+            ]
+        );
+    }
+
     // ---- HTML
 
     fn html_rule() -> Rule {
