@@ -1,4 +1,4 @@
-mod adapter;
+mod adapters;
 mod check;
 mod config;
 mod data;

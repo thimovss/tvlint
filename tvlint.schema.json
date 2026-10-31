@@ -236,6 +236,11 @@
           "type": "boolean"
         },
         "literal_argument": { "$ref": "#/$defs/literalArgument" },
+        "max_lines": {
+          "description": "The most lines a file may have, in any language. A longer file is reported once, on the first line over the limit.",
+          "type": "integer",
+          "minimum": 1
+        },
         "require_filename": {
           "description": "File name globs, matched against the base name only. Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. The only check that works without `language`.",
           "$ref": "#/$defs/stringList"
@@ -261,6 +266,7 @@
         { "required": ["require_property"] },
         { "required": ["same_keys_as"] },
         { "required": ["literal_argument"] },
+        { "required": ["max_lines"] },
         { "required": ["require_filename"] }
       ],
 
@@ -293,7 +299,8 @@
               { "required": ["require_property"] },
               { "required": ["same_keys_as"] },
               { "required": ["same_placeholders"] },
-              { "required": ["literal_argument"] }
+              { "required": ["literal_argument"] },
+              { "required": ["max_lines"] }
             ]
           },
           "then": { "required": ["language"] }

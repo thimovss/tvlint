@@ -21,7 +21,7 @@ rules:
     language: rust
     forbid_call: ["*.kind"]
     rationale: >
-      Tree-sitter node kinds such as "raise_statement" differ per language. Only the adapters (src/adapter.rs) may
+      Tree-sitter node kinds such as "raise_statement" differ per language. Only the adapters (src/adapters/) may
       match on them. The engine asks the adapter a language-neutral question instead.
     fix: Add a method to the Adapter trait, implement it for each language, and call that.
 
@@ -79,9 +79,9 @@ rules:
   # Each module may only depend on the ones below it, and a module may always import itself (that is
   # what `use super::*` in its tests resolves to). The dependency order, lowest first:
   #
-  #   config, select  <  source, scope  <  data  <  adapter  <  check  <  suppress  <  validate, main
+  #   config, select  <  source, scope  <  data  <  adapters  <  check  <  suppress  <  validate, main
   #
-  # adapter and check refer to each other (Project lives in check, and check calls the adapters). That
+  # adapters and check refer to each other (Project lives in check, and check calls the adapters). That
   # one import is allowed on purpose (a bare `crate::x` is listed beside `crate::x::**`, since `use crate::x::{self}` is the module itself); anything else going the wrong way is a mistake.
 
   foundation-modules-import-nothing:
@@ -108,14 +108,14 @@ rules:
   adapters-depend-on-config-and-project:
     language: rust
     forbid_import: ["crate::**"]
-    except_import: ["crate::adapter::**", "crate::adapter", "crate::config::**", "crate::config", "crate::check::Project"]
+    except_import: ["crate::adapters::**", "crate::adapters", "crate::config::**", "crate::config", "crate::check::Project"]
     rationale: An adapter answers questions about a syntax tree. It must not depend on the engine, the commands or the suppression logic built on top of it.
     fix: Pass what the adapter needs in as an argument, or move the shared type down.
 
   engine-depends-on-adapters-and-source:
     language: rust
     forbid_import: ["crate::**"]
-    except_import: ["crate::check::**", "crate::check", "crate::adapter::**", "crate::adapter", "crate::data::**", "crate::data", "crate::config::**", "crate::config", "crate::source::**", "crate::source"]
+    except_import: ["crate::check::**", "crate::check", "crate::adapters::**", "crate::adapters", "crate::data::**", "crate::data", "crate::config::**", "crate::config", "crate::source::**", "crate::source"]
     rationale: The engine evaluates rules. It must not depend on the commands that call it or on the modules built on top of it (suppress, select, scope, validate).
     fix: Pass what the engine needs in as an argument.
 
@@ -125,6 +125,16 @@ rules:
     except_import: ["crate::suppress::**", "crate::suppress", "crate::check::**", "crate::check", "crate::source::**", "crate::source"]
     rationale: suppress.rs reads comments from parsed files. It must not depend on the commands.
     fix: Return what the commands need and let them combine it.
+
+  # ---- Size -------------------------------------------------------------------------------------
+
+  no-huge-files:
+    language: rust
+    max_lines: 1000
+    rationale: >
+      A file this long holds more than one responsibility and is slow to review. Unit tests count, which is why the
+      larger modules keep theirs in a tests.rs next to them.
+    fix: Split the file by responsibility, as src/adapters/ is split per language, or move its tests to a tests.rs.
 
   # ---- Data files -------------------------------------------------------------------------------
 
@@ -159,14 +169,14 @@ scopes:
   # errors, not syntax nodes.
   - rules: [node-kinds-only-in-adapters]
     include: ["src/**"]
-    exclude: ["src/adapter.rs", "src/data.rs", "src/suppress.rs", "src/validate.rs"]
+    exclude: ["src/adapters/**", "src/data.rs", "src/suppress.rs", "src/validate.rs"]
 
-  - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections]
+  - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections, no-huge-files]
     include: ["src/**"]
 
   - rules: [yaml-only-in-config-and-validate]
     include: ["src/**"]
-    exclude: ["src/config.rs", "src/validate.rs"]
+    exclude: ["src/config.rs", "src/validate.rs", "src/validate/**"]
 
   - rules: [foundation-modules-import-nothing]
     include: ["src/config.rs", "src/select.rs"]
@@ -178,7 +188,7 @@ scopes:
     include: ["src/source.rs", "src/scope.rs"]
 
   - rules: [adapters-depend-on-config-and-project]
-    include: ["src/adapter.rs"]
+    include: ["src/adapters/**"]
 
   - rules: [engine-depends-on-adapters-and-source]
     include: ["src/check.rs"]

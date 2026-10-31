@@ -317,6 +317,7 @@ scopes:
 | `same_placeholders` | JSON, YAML and TOML. `true` also requires each shared message to use the same `{{name}}` / `{name}` placeholders as the reference. Needs `same_keys_as`. |
 | `literal_argument` | Python, JavaScript, TypeScript and Rust. String literals passed to calls must be listed in a data file, see [Code that must match a data file](#code-that-must-match-a-data-file). |
 | `within_property` | JavaScript and TypeScript. Narrows `forbid_call`, `forbid_raise` and `forbid_element` to hits that sit inside an object-literal property with one of these names, e.g. `onError`. |
+| `max_lines` | Any language. The most lines a file may have (a positive whole number). A longer file is reported once, on the first line over the limit, with the file's total. `tvlint-ignore-file` skips it. |
 | `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
 | `fix` | Required. How to comply. Printed with every violation. |

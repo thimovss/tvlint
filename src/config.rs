@@ -97,13 +97,13 @@ impl Language {
     pub fn supports(self, key: &str) -> bool {
         use Language::*;
         if self.is_data() {
-            return matches!(key, "forbid_property" | "property_value" | "require_property" | "same_keys_as" | "same_placeholders");
+            return matches!(key, "forbid_property" | "property_value" | "require_property" | "same_keys_as" | "same_placeholders" | "max_lines");
         }
         if self == Css {
-            return matches!(key, "forbid_call" | "forbid_import" | "except_import" | "forbid_property" | "literal_argument" | "require_filename");
+            return matches!(key, "forbid_call" | "forbid_import" | "except_import" | "forbid_property" | "literal_argument" | "max_lines" | "require_filename");
         }
         if self == Html {
-            return matches!(key, "forbid_element" | "forbid_property" | "property_value" | "require_filename");
+            return matches!(key, "forbid_element" | "forbid_property" | "property_value" | "max_lines" | "require_filename");
         }
         match key {
             "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
@@ -227,6 +227,8 @@ pub struct Rule {
     /// Every matched file's name must match one of these globs.
     #[serde(default)]
     pub require_filename: Vec<String>,
+    /// Files with more lines than this are reported.
+    pub max_lines: Option<usize>,
     pub rationale: String,
     pub fix: String,
 }
@@ -329,6 +331,7 @@ impl Rule {
             ("same_keys_as", self.same_keys_as.is_some()),
             ("same_placeholders", self.same_placeholders),
             ("literal_argument", self.literal_argument.is_some()),
+            ("max_lines", self.max_lines.is_some()),
         ] {
             if present {
                 keys.push(key);
@@ -406,6 +409,9 @@ impl Rule {
         }
         if !self.within_property.is_empty() {
             out.push(format!("(only inside a property named {})", self.within_property.join(", ")));
+        }
+        if let Some(max) = self.max_lines {
+            out.push(format!("files longer than {max} lines"));
         }
         if !self.require_filename.is_empty() {
             out.push(format!("file names other than {}", self.require_filename.join(", ")));
@@ -516,7 +522,7 @@ impl Config {
                 bail!("rule id `{id}` {problem}");
             }
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
-                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument or require_filename)");
+                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, max_lines or require_filename)");
             }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
