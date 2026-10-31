@@ -12,7 +12,7 @@ cargo install --path .
 
 ## Usage
 
-In a project without a config, `prlint init` writes a starter `prlint.yaml` with rules for the languages it finds (see below). Then run from the directory that contains `prlint.yaml`:
+In a project without a config, `prlint init` writes an empty `prlint.yaml` to fill in. Then run from the directory that contains `prlint.yaml`:
 
 ```bash
 prlint
@@ -27,7 +27,7 @@ prlint [OPTIONS] [COMMAND]
 | Command | What it does |
 |---|---|
 | `check [PATH]...` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. Pass files, directories or glob patterns to check only those (see below). |
-| `init [--force]` | Writes a starter `prlint.yaml` with ready-made rules from the cookbook for the languages found in the project (Python, JavaScript/TypeScript, Rust, plus `Cargo.toml` and `package.json` rules when those exist). Refuses to overwrite an existing file unless `--force` is given, and writes nothing when the project has no code to choose rules for. |
+| `init [--force]` | Scaffolds an empty `prlint.yaml`: no rules, only a commented example and the commands to run next. Refuses to overwrite an existing file unless `--force` is given. |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |

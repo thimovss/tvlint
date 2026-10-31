@@ -295,7 +295,7 @@ fn validate_rules(rules: &Value, report: &mut Report) -> BTreeSet<String> {
         return ids;
     };
     if map.is_empty() {
-        report.error("rules", "no rules are defined", Some("add at least one rule under `rules:`".into()));
+        report.warning("rules", "no rules are defined yet, so nothing is enforced", Some("add a rule under `rules:`".into()));
     }
     for (key, value) in map {
         let Some(id) = key.as_str() else {
@@ -737,7 +737,7 @@ fn validate_scopes(scopes: &Value, rule_ids: &BTreeSet<String>, report: &mut Rep
         return referenced;
     };
     if list.is_empty() {
-        report.error("scopes", "no scopes are defined, so no rule would run", Some("add an entry with `rules` and `include`".into()));
+        report.warning("scopes", "no scopes are defined, so no rule would run", Some("add an entry with `rules` and `include`".into()));
     }
     for (i, entry) in list.iter().enumerate() {
         let path = format!("scopes[{i}]");
@@ -1135,7 +1135,15 @@ scopes:
     #[test]
     fn missing_sections_are_reported() {
         let found = errors("rules: {}\n");
-        assert!(has(&found, "rules", "no rules"), "{found:?}");
         assert!(has(&found, "", "missing required key `scopes`"), "{found:?}");
+    }
+
+    #[test]
+    fn an_empty_config_is_only_a_warning() {
+        let value: Value = serde_yaml_ng::from_str("rules: {}\nscopes: []\n").unwrap();
+        let mut report = Report::default();
+        validate_structure(&value, &mut report);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.warnings.len(), 2);
     }
 }
