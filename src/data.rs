@@ -690,6 +690,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn toml_quoted_keys_in_headers_and_duplicate_keys() {
+        let d = doc("a.toml", "[\"a.b\".c]\nx = 1\n['single']\ny = 2\n[t]\nk = 1\nk = 2\n[[arr]]\n[[arr]]\nv = 3\n");
+        assert_eq!(dump(&d), ["a.b", "a.b.c", "a.b.c.x = 1", "single", "single.y = 2", "t", "t.k = 1", "t.k = 2", "arr", "arr.0", "arr.1", "arr.1.v = 3"]);
+        // A quoted segment in a path pattern finds the dotted key.
+        let found = d.registry(&PathPattern::parse("\"a.b\".c.x").unwrap(), Use::Value);
+        assert_eq!(found.into_keys().collect::<Vec<_>>(), ["1"]);
+    }
+
+    #[test]
+    fn json_duplicate_keys_are_kept() {
+        assert_eq!(dump(&doc("a.json", "{\"a\": 1, \"a\": 2}")), ["a = 1", "a = 2"]);
+    }
+
+    #[test]
+    fn empty_files_have_no_roots() {
+        assert!(doc("a.json", "").roots.is_empty());
+        assert!(doc("a.yaml", "").roots.is_empty());
+        assert_eq!(doc("a.toml", "").roots.len(), 1);
+    }
+
     fn matches(pattern: &str, path: &str) -> bool {
         let path: Vec<String> = path.split('.').map(String::from).collect();
         PathPattern::parse(pattern).unwrap().matches(&path)

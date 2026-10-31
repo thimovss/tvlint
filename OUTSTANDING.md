@@ -12,10 +12,10 @@ Status after commit `e3ae059` (JSON, YAML and TOML support).
 
 ## Not verified
 
-6. **`example/` projects.** `example/prlint.yaml` (5 violations expected) and `example/frontend/prlint.yaml` (47 expected) have not been re-run since data files and the hidden-directory change.
-7. **Cookbook recipes.** Only some of the new ones were run end to end: `no-latest-image-tags`, `kubernetes-containers-have-limits`, `tsconfig-is-strict`, `translation-keys-exist`, the error-codes recipe. The others were only checked for valid structure: `actions-pinned-to-sha`, `workflows-declare-permissions`, `pinned-npm-versions`, `workspace-packages-use-workspace-protocol`, `locale-files-match`, `feature-flags-have-owners`, and the three TOML recipes.
+6. **Done: `example/` projects.** Re-run after the change: 5 and 47 violations as before. (`example/prlint.yaml` (5 violations expected) and `example/frontend/prlint.yaml` (47 expected) were the ones to re-run.)
+7. **Done: cookbook recipes.** Every new recipe has now been run against a violating fixture and reports what it should; no recipe needed changing. (Earlier only some were run: `no-latest-image-tags`, `kubernetes-containers-have-limits`, `tsconfig-is-strict`, `translation-keys-exist`, the error-codes recipe. The others were only checked for valid structure: `actions-pinned-to-sha`, `workflows-declare-permissions`, `pinned-npm-versions`, `workspace-packages-use-workspace-protocol`, `locale-files-match`, `feature-flags-have-owners`, and the three TOML recipes.)
 8. **Performance.** Every JSON, YAML and TOML file is now parsed, lockfiles included. Not measured against the targets in CLAUDE.md (under 1s for 10k files; under 100ms for changed-files-only).
-9. **Missing tests:**
+9. **Done: tests** in `tests/data_files.rs` (CLI end to end) and `src/data.rs`. Covered now:
    - hidden-directory walk
    - the "registry file not found" error in `check`
    - unused-entry reporting with `--staged` or `PATH` arguments
@@ -28,7 +28,7 @@ Status after commit `e3ae059` (JSON, YAML and TOML support).
 10. **Dotted keys.** Paths are joined with `.`. For `same_keys_as`, `use: path` and "missing key" positions, a key that itself contains a dot (like `a_failed.x`) is ambiguous.
 11. **YAML.** `same_keys_as` compares only the first document. Aliases and merge keys (`<<`) are not resolved. List items show as indexes in messages (`containers.1`).
 12. **Value checks.** They match text only, so `true` and `"true"` are indistinguishable. Lists and mappings are skipped by `forbid_value` and `require_value`.
-13. **README accuracy.** It says JSON suppression needs `.jsonc` files. The JSON grammar also accepts comments in plain `.json`; test it and correct the text.
+13. **Done: README accuracy.** Directives work in plain `.json` too (tested); the text now says so.
 14. **Not built:**
     - an expiry-date check for feature flags (depends on the clock, so results would vary)
     - a rule type that runs a command, which would let a rule check README or cookbook sync
