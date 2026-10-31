@@ -4,7 +4,7 @@ Done items are removed from this list.
 
 ## Needs a decision
 
-1. **License.** The project is fully open source for now (decided), but there is no LICENSE file and `Cargo.toml` has no `license` field. Pick one (MIT/Apache-2.0 is the usual Rust choice).
+1. **Contributor agreement.** The project is AGPL-3.0-only. To sell a commercial license later, the copyright must be owned or licensed to you: set up a CLA (or copyright assignment) before accepting the first outside contribution, and add a CONTRIBUTING.md.
 2. **CLAUDE.md open questions**, still unanswered: shareable rule packs, how much cross-file analysis is worth it.
 
 ## Performance

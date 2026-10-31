@@ -277,3 +277,7 @@ A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `r
 | `exclude` | Optional globs to leave out. |
 
 A rule that appears in no scope never runs. Files ignored by `.gitignore` are skipped.
+
+## License
+
+AGPL-3.0-only. See [LICENSE](LICENSE).

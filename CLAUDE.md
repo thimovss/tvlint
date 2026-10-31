@@ -100,7 +100,7 @@ Ours: simple declarative rules, deterministic results, agent-readable feedback, 
 
 ## Decisions
 
-- **Fully open source for now.** No paid hosted layer or commercial edition is planned; revisit if a hosted dashboard (v1.0) becomes real. The license is not chosen yet and the repo has no LICENSE file.
+- **Open source under AGPL-3.0-only.** Open source is non-negotiable. The network clause covers hosted use, and a commercial license (dual licensing) is the way to make money later. Because that needs copyright ownership, outside contributions need a CLA or copyright assignment before they are accepted.
 
 ## Open Questions
 
