@@ -12,7 +12,7 @@ cargo install --path .
 
 ## Usage
 
-In a project without a config, `tvl init` writes an empty `tvl.yaml` to fill in. Then run from the directory that contains `tvl.yaml`:
+In a project without a config, `tvl init` writes an empty `tvlint.yaml` to fill in. Then run from the directory that contains `tvlint.yaml`:
 
 ```bash
 tvl
@@ -27,11 +27,11 @@ tvl [OPTIONS] [COMMAND]
 | Command | What it does |
 |---|---|
 | `check [PATH]...` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `tvl` and `tvl check` are the same. Pass files, directories or glob patterns to check only those (see below). |
-| `init [--force]` | Scaffolds an empty `tvl.yaml`: no rules, only a commented example and the commands to run next. Refuses to overwrite an existing file unless `--force` is given. |
+| `init [--force]` | Scaffolds an empty `tvlint.yaml`: no rules, only a commented example and the commands to run next. Refuses to overwrite an existing file unless `--force` is given. |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |
-| `schema` | Prints the JSON Schema of the config file (also kept in [tvl.schema.json](tvl.schema.json)). Point your editor at it for completion and inline errors, or give it to an AI agent that writes rules. |
+| `schema` | Prints the JSON Schema of the config file (also kept in [tvlint.schema.json](tvlint.schema.json)). Point your editor at it for completion and inline errors, or give it to an AI agent that writes rules. |
 | `help [command]` | Prints help for TVLint or for one command. |
 
 ### Checking specific files
@@ -42,7 +42,7 @@ tvl [OPTIONS] [COMMAND]
 tvl check src/api.ts                    # one file
 tvl check src/routes src/hooks          # directories: everything below them
 tvl check "src/**/*.test.ts"            # a glob: quote it so tvl expands it, not the shell
-tvl check -c frontend/tvl.yaml frontend/src/App.tsx   # from the repo root, as a pre-commit hook does
+tvl check -c frontend/tvlint.yaml frontend/src/App.tsx   # from the repo root, as a pre-commit hook does
 ```
 
 - A file is still only checked by the rules whose scope includes it. Passing a path narrows what runs, it never widens a scope.
@@ -56,7 +56,7 @@ tvl check -c frontend/tvl.yaml frontend/src/App.tsx   # from the repo root, as a
 |---|---|
 | `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. Combined with `PATH` arguments, a file must be both staged and selected. |
 | `--format <FORMAT>` | `check` only. `text` (default) is for people. `json` prints one document with `violations` (each with `rule`, `file`, `line`, `column`, `message`, `rationale` and `fix`) and a `summary`, for scripts and AI agents. `sarif` prints SARIF 2.1.0 for GitHub code scanning and editors; the `fix` goes in the rule's `help` and the result message. With `json` or `sarif`, stdout holds only the document (warnings go to stderr), and the exit code is the same: `1` when there are violations. |
-| `-c, --config <path>` | Path to the config file. Defaults to `tvl.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
+| `-c, --config <path>` | Path to the config file. Defaults to `tvlint.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |
 
@@ -70,13 +70,13 @@ tvl check -c frontend/tvl.yaml frontend/src/App.tsx   # from the repo root, as a
 
 ### Editor and agent support
 
-`tvl.schema.json` describes the config file: keys, types, which languages each check supports, and which keys need each other. Add this as the first line of `tvl.yaml` and editors with the YAML language server (VS Code, JetBrains, Neovim) complete keys and flag mistakes as you type:
+`tvlint.schema.json` describes the config file: keys, types, which languages each check supports, and which keys need each other. Add this as the first line of `tvlint.yaml` and editors with the YAML language server (VS Code, JetBrains, Neovim) complete keys and flag mistakes as you type:
 
 ```yaml
-# yaml-language-server: $schema=./tvl.schema.json
+# yaml-language-server: $schema=./tvlint.schema.json
 ```
 
-`tvl schema` prints the same schema, so it works from an installed binary: `tvl schema > tvl.schema.json`. The schema cannot check that scopes name existing rules, that globs are valid, or that a scope matches any files; `tvl validate` does.
+`tvl schema` prints the same schema, so it works from an installed binary: `tvl schema > tvlint.schema.json`. The schema cannot check that scopes name existing rules, that globs are valid, or that a scope matches any files; `tvl validate` does.
 
 ### Exit codes
 
@@ -230,7 +230,7 @@ rules:
 
 Looking for rules to start from? See the [cookbook](cookbook/).
 
-`tvl.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
+`tvlint.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
 
 ```yaml
 rules:

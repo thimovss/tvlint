@@ -27,7 +27,7 @@ use suppress::Suppressions;
 #[command(name = "tvl", version, about = "Enforce your team's code rules deterministically")]
 struct Cli {
     /// Path to the config file; the project root is its directory
-    #[arg(short, long, global = true, default_value = "tvl.yaml")]
+    #[arg(short, long, global = true, default_value = "tvlint.yaml")]
     config: PathBuf,
 
     /// Defaults to `check` when omitted
@@ -71,7 +71,7 @@ enum Command {
     List,
     /// Check the config file for mistakes and explain every problem (exit 1 if invalid)
     Validate,
-    /// Create a starter tvl.yaml, with rules chosen for the languages found in the project
+    /// Create a starter tvlint.yaml, with rules chosen for the languages found in the project
     Init {
         /// Overwrite the config file if it already exists
         #[arg(long)]
@@ -81,7 +81,7 @@ enum Command {
     Schema,
 }
 
-pub const SCHEMA: &str = include_str!("../tvl.schema.json");
+pub const SCHEMA: &str = include_str!("../tvlint.schema.json");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();

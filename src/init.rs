@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 /// An empty but valid config. The commented rule shows the shape; nothing is enforced until the user writes one.
 const TEMPLATE: &str = "\
-# tvl.yaml: the rules of this project, checked deterministically.
+# tvlint.yaml: the rules of this project, checked deterministically.
 #
 #   tvl validate        is this file correct?
 #   tvl check           does the code follow it?

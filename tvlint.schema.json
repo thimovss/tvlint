@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "TVLint configuration",
-  "description": "A tvl.yaml file: `rules` say what is forbidden, `scopes` say which files each rule runs on.",
+  "description": "A tvlint.yaml file: `rules` say what is forbidden, `scopes` say which files each rule runs on.",
   "type": "object",
   "required": ["rules", "scopes"],
   "additionalProperties": false,

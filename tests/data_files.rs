@@ -78,7 +78,7 @@ fn hidden_directories_are_read_but_git_is_not() {
     let p = Project::new(
         "hidden",
         &[
-            ("tvl.yaml", WORKFLOW_RULES),
+            ("tvlint.yaml", WORKFLOW_RULES),
             (".github/workflows/ci.yml", "jobs:\n  a:\n    runs-on: x\n"),
             (".git/odd.yml", "jobs:\n  a:\n    runs-on: x\n"),
         ],
@@ -107,7 +107,7 @@ const RAISES: &str = "raise AppException('used')\nraise AppException('typo')\n";
 
 #[test]
 fn a_missing_registry_file_stops_check_with_exit_two() {
-    let p = Project::new("noregistry", &[("tvl.yaml", REGISTRY_RULES), ("src/a.py", RAISES)]);
+    let p = Project::new("noregistry", &[("tvlint.yaml", REGISTRY_RULES), ("src/a.py", RAISES)]);
     let out = p.tvl(&["check"]);
     assert_eq!(exit(&out), 2);
     assert!(stderr(&out).contains("rule `codes` reads codes.json"), "{}", stderr(&out));
@@ -115,7 +115,7 @@ fn a_missing_registry_file_stops_check_with_exit_two() {
 
 #[test]
 fn validate_checks_registry_files_against_the_project() {
-    let p = Project::new("validate", &[("tvl.yaml", REGISTRY_RULES), ("src/a.py", RAISES)]);
+    let p = Project::new("validate", &[("tvlint.yaml", REGISTRY_RULES), ("src/a.py", RAISES)]);
     let out = p.tvl(&["validate"]);
     assert_eq!(exit(&out), 1);
     assert!(stdout(&out).contains("`codes.json` is not a JSON, YAML or TOML file in the project"), "{}", stdout(&out));
@@ -133,7 +133,7 @@ fn validate_checks_registry_files_against_the_project() {
 
 #[test]
 fn unused_entries_are_reported_in_the_registry_and_only_when_it_is_selected() {
-    let p = Project::new("unused", &[("tvl.yaml", REGISTRY_RULES), ("codes.json", CODES), ("src/a.py", RAISES)]);
+    let p = Project::new("unused", &[("tvlint.yaml", REGISTRY_RULES), ("codes.json", CODES), ("src/a.py", RAISES)]);
     let all = p.tvl(&["check"]);
     assert_eq!(violations(&all), ["codes.json:4:5", "src/a.py:2:20"]);
 
@@ -148,7 +148,7 @@ fn unused_entries_are_reported_in_the_registry_and_only_when_it_is_selected() {
 
 #[test]
 fn staged_registry_counts_usage_from_files_that_are_not_staged() {
-    let p = Project::new("staged", &[("tvl.yaml", REGISTRY_RULES), ("codes.json", "{\"codes\": [\"used\"]}"), ("src/a.py", RAISES)]);
+    let p = Project::new("staged", &[("tvlint.yaml", REGISTRY_RULES), ("codes.json", "{\"codes\": [\"used\"]}"), ("src/a.py", RAISES)]);
     p.git(&["init", "-q"]);
     p.git(&["add", "."]);
     p.git(&["commit", "-q", "-m", "init"]);
@@ -174,7 +174,7 @@ scopes:
     let p = Project::new(
         "suppress",
         &[
-            ("tvl.yaml", rules),
+            ("tvlint.yaml", rules),
             ("cfg/a.yaml", "# tvlint-ignore-next-line: legacy\ndebug: true\n"),
             ("cfg/b.toml", "# tvlint-ignore-next-line: legacy\ndebug = true\n"),
             ("cfg/c.json", "{\n  // tvlint-ignore-next-line: legacy\n  \"debug\": true\n}\n"),
@@ -195,7 +195,7 @@ fn init_scaffolds_an_empty_valid_config_and_never_overwrites() {
 
     let created = project.tvl(&["init"]);
     assert_eq!(created.status.code(), Some(0), "{}", stdout(&created));
-    let config = std::fs::read_to_string(project.root.join("tvl.yaml")).unwrap();
+    let config = std::fs::read_to_string(project.root.join("tvlint.yaml")).unwrap();
     assert!(config.contains("rules: {}"));
 
     // Valid, with a warning that nothing is enforced yet, and nothing is flagged.
@@ -215,7 +215,7 @@ fn json_and_sarif_output_are_documents_on_stdout() {
     let project = Project::new(
         "formats",
         &[
-            ("tvl.yaml", "rules:\n  no-print:\n    language: python\n    forbid_call: [print]\n    rationale: Use the logger.\n    fix: Call logging.info.\nscopes:\n  - rules: [no-print]\n    include: ['**']\n"),
+            ("tvlint.yaml", "rules:\n  no-print:\n    language: python\n    forbid_call: [print]\n    rationale: Use the logger.\n    fix: Call logging.info.\nscopes:\n  - rules: [no-print]\n    include: ['**']\n"),
             ("a.py", "print(1)\n"),
         ],
     );

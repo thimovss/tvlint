@@ -1,6 +1,6 @@
 # Cookbook: YAML
 
-Ready-made rules for `tvl.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
+Ready-made rules for `tvlint.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
 
 Rules on JSON, YAML and TOML read **key paths** (`jobs.*.timeout-minutes`), not syntax. In YAML, list items are addressed by index, so `*` also steps into lists, and every document of a multi-document file is checked. See [Data files](../../README.md#data-files). Values in `forbid_value` and `require_value` are globs: write a literal `*` as `[*]`.
 

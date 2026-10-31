@@ -17,7 +17,7 @@ TVLint is open source under the [AGPL-3.0](LICENSE). The maintainer also reserve
 cargo build
 cargo test
 cargo clippy --all-targets
-cargo run -- check          # tvl checks its own code against tvl.yaml
+cargo run -- check          # tvl checks its own code against tvlint.yaml
 ```
 
 All four must pass. CI runs `tvl validate` and `tvl check` on every pull request.
@@ -25,8 +25,8 @@ All four must pass. CI runs `tvl validate` and `tvl check` on every pull request
 ## What a change should include
 
 - **Tests.** Unit tests sit next to the code; end-to-end CLI tests are in `tests/`.
-- **Docs.** A new rule key, flag or command goes in `README.md`. A new rule type or language also goes in `tvl.schema.json` (`tvl schema` prints the current one).
-- **Architecture.** `tvl.yaml` encodes the layering of the modules and which crates may be used where. If `tvl check` reports a violation, its `rationale` and `fix` say what to do. Don't suppress it without a reason.
+- **Docs.** A new rule key, flag or command goes in `README.md`. A new rule type or language also goes in `tvlint.schema.json` (`tvl schema` prints the current one).
+- **Architecture.** `tvlint.yaml` encodes the layering of the modules and which crates may be used where. If `tvl check` reports a violation, its `rationale` and `fix` say what to do. Don't suppress it without a reason.
 - **Recipes.** Ready-made rules live in `cookbook/`, one `.yaml` file per rule, each with a `rationale` and a `fix`.
 
 ## Reporting a problem

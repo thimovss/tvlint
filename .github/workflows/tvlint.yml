@@ -1,4 +1,4 @@
-# Runs TVLint's own rules (tvl.yaml) against this repository.
+# Runs TVLint's own rules (tvlint.yaml) against this repository.
 name: TVLint
 
 on:
@@ -25,7 +25,7 @@ jobs:
       - name: Build TVLint
         run: cargo build --release --locked
 
-      - name: Validate tvl.yaml
+      - name: Validate tvlint.yaml
         run: ./target/release/tvl validate
 
       # Exit code 1 only means "violations found", which the next step reports; 2 is a real failure.

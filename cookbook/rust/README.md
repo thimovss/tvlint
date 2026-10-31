@@ -1,6 +1,6 @@
 # Cookbook: Rust
 
-Ready-made rules for `tvl.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths and module names, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
+Ready-made rules for `tvlint.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths and module names, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
 
 This cookbook only has rules that depend on your architecture. Generic problems such as `unwrap`, `println!`, `dbg!` and `todo!` are covered by Clippy's restriction lints.
 

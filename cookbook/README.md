@@ -1,6 +1,6 @@
 # Cookbook
 
-Ready-made rules to copy into your `tvl.yaml`, one file per recipe.
+Ready-made rules to copy into your `tvlint.yaml`, one file per recipe.
 
 - [Python](python/README.md)
 - [TypeScript and JavaScript](typescript/README.md)
