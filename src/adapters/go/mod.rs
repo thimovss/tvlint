@@ -1,9 +1,14 @@
-//! Go. No exceptions either: the checks are calls (`fmt.Println`, `db.Query`) and import paths.
+//! Go. No exceptions either: the checks are calls (`fmt.Println`, `db.Query`) and import paths,
+//! which resolve to project directories through the module paths in `go.mod`.
+
+mod gomod;
 
 use tree_sitter::Node;
 
 use super::{Adapter, ImportRef, first_named_child, text};
 use crate::check::Project;
+
+pub use gomod::GoModules;
 
 pub(super) struct Go;
 
@@ -61,7 +66,7 @@ impl Adapter for Go {
         let Some(path) = node.child_by_field_name("path") else { return Vec::new() };
         match self.string_value(path, src) {
             Some(specifier) => {
-                let resolved = project.modules.go.resolve(&specifier).unwrap_or_else(|| specifier.clone());
+                let resolved = project.resolvers.go.resolve(&specifier).unwrap_or_else(|| specifier.clone());
                 vec![ImportRef { specifier, resolved }]
             }
             None => Vec::new(),

@@ -13,10 +13,19 @@ mod python;
 mod rust;
 mod shell;
 
+pub use ecmascript::TsConfigs;
+pub use go::GoModules;
+pub use python::PythonRoots;
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use anyhow::Result;
 use tree_sitter::Node;
 
 use crate::check::Project;
 use crate::config::Language;
+use crate::data::Doc;
 
 /// One module imported by a statement: as written, and as the project path it leads to.
 pub struct ImportRef {
@@ -133,4 +142,50 @@ fn relative_path(specifier: &str, file_path: &str) -> Option<String> {
         }
     }
     Some(parts.join("/"))
+}
+
+/// `a/b` joined with `c`; either side may be empty.
+fn join(dir: &str, rest: &str) -> String {
+    match (dir.is_empty(), rest.is_empty()) {
+        (true, _) => rest.to_string(),
+        (_, true) => dir.to_string(),
+        _ => format!("{dir}/{rest}"),
+    }
+}
+
+/// What the project's own files say about where imports lead, read once for all adapters:
+/// `tsconfig.json` for JavaScript and TypeScript, `go.mod` for Go, `pyproject.toml` for Python.
+/// Nothing is executed. Each adapter owns the reading of its files and the use of the result.
+#[derive(Debug, Default)]
+pub struct Resolvers {
+    pub ts: TsConfigs,
+    pub go: GoModules,
+    pub py: PythonRoots,
+}
+
+impl Resolvers {
+    /// Reads the files of the languages in `checked`, which are the ones some rule checks imports for.
+    /// `paths` is every file in the project; `docs` holds the parsed data files.
+    pub fn load(
+        root: &Path,
+        paths: &[String],
+        docs: &BTreeMap<String, Doc>,
+        checked: &[Language],
+    ) -> Result<Resolvers> {
+        let wants = |languages: &[Language]| languages.iter().any(|l| checked.contains(l));
+        Ok(Resolvers {
+            ts: if wants(&[Language::JavaScript, Language::TypeScript]) { TsConfigs::load(root, paths)? } else { TsConfigs::default() },
+            go: if wants(&[Language::Go]) { GoModules::load(root, paths)? } else { GoModules::default() },
+            py: if wants(&[Language::Python]) { PythonRoots::load(docs, paths) } else { PythonRoots::default() },
+        })
+    }
+
+    #[cfg(test)]
+    pub fn for_test(go_modules: &[(&str, &str)], files: &[String]) -> Resolvers {
+        Resolvers {
+            go: GoModules::for_test(go_modules),
+            py: PythonRoots::load(&BTreeMap::new(), files),
+            ..Default::default()
+        }
+    }
 }

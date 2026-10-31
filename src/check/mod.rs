@@ -19,8 +19,8 @@ pub struct Project<'a> {
     pub index: &'a ClassIndex,
     /// Import prefix -> project path, e.g. `@/` -> `src/`.
     pub aliases: &'a BTreeMap<String, String>,
-    /// What `tsconfig.json`, `go.mod` and `pyproject.toml` say about where imports lead. The `aliases` of the rule's config win over tsconfig.
-    pub modules: &'a crate::modules::Modules,
+    /// What `tsconfig.json`, `go.mod` and `pyproject.toml` say about where imports lead (owned by the adapters). The `aliases` of the rule's config win over tsconfig.
+    pub resolvers: &'a crate::adapters::Resolvers,
     /// Every file in the project, to find which file an import points at.
     pub paths: &'a HashSet<String>,
     /// Every JSON, YAML and TOML file, parsed.

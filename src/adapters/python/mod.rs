@@ -1,9 +1,13 @@
-//! Python
+//! Python. Imports resolve to project files through the source roots in `pyproject.toml`.
+
+mod roots;
 
 use tree_sitter::Node;
 
 use super::{Adapter, ImportRef, last_segment, text};
 use crate::check::Project;
+
+pub use roots::PythonRoots;
 
 pub(super) struct Python;
 
@@ -162,7 +166,7 @@ fn py_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
     let dots = specifier.chars().take_while(|c| *c == '.').count();
     let parts: Vec<&str> = specifier[dots..].split('.').filter(|p| !p.is_empty() && *p != "*").collect();
     let bases: Vec<String> = if dots == 0 {
-        project.modules.py.roots_for(file_path).to_vec()
+        project.resolvers.py.roots_for(file_path).to_vec()
     } else {
         let mut dir: Vec<&str> = file_path.split('/').collect();
         dir.pop(); // the file name
@@ -175,7 +179,7 @@ fn py_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
     };
     for base in &bases {
         for length in (1..=parts.len()).rev() {
-            let module = crate::modules::join(base, &parts[..length].join("/"));
+            let module = crate::adapters::join(base, &parts[..length].join("/"));
             for candidate in [format!("{module}.py"), format!("{module}/__init__.py")] {
                 if project.paths.contains(&candidate) {
                     return candidate;

@@ -1,9 +1,13 @@
 //! JavaScript and TypeScript share one adapter: the TypeScript grammar is a superset.
 
+mod tsconfig;
+
 use tree_sitter::Node;
 
 use super::{Adapter, ImportRef, Property, first_named_child, relative_path, text};
 use crate::check::Project;
+
+pub use tsconfig::TsConfigs;
 
 pub(super) struct EcmaScript;
 
@@ -223,7 +227,7 @@ fn es_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
     {
         // The aliases written in tvlint.yaml win over the ones read from tsconfig.
         vec![format!("{target}{}", &specifier[prefix.len()..])]
-    } else if let Some(candidates) = project.modules.ts.resolve(specifier, file_path) {
+    } else if let Some(candidates) = project.resolvers.ts.resolve(specifier, file_path) {
         candidates
     } else {
         return specifier.to_string();

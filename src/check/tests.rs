@@ -64,7 +64,7 @@ fn hits_with(
     let index = ClassIndex::build(std::slice::from_ref(&file));
     let compiled = CompiledRule::new("r", rule).unwrap();
     let docs = BTreeMap::new();
-    let ctx = Project { index: &index, aliases, modules: &crate::modules::Modules::default(), paths, docs: &docs };
+    let ctx = Project { index: &index, aliases, resolvers: &crate::adapters::Resolvers::default(), paths, docs: &docs };
     let mut out = Vec::new();
     check_file(&file, &compiled, &ctx, &mut out);
     out.into_iter().map(|v| (v.line, v.message)).collect()
@@ -77,7 +77,7 @@ fn project_hits(files: &[(&str, &str)], target: &str, rule: &Rule) -> Vec<(usize
     let docs: BTreeMap<String, Doc> = parsed.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), Doc::build(f))).collect();
     let compiled = CompiledRule::new("r", rule).unwrap();
     let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-    let ctx = Project { index: &index, aliases: &aliases, modules: &crate::modules::Modules::default(), paths: &paths, docs: &docs };
+    let ctx = Project { index: &index, aliases: &aliases, resolvers: &crate::adapters::Resolvers::default(), paths: &paths, docs: &docs };
     let mut out = Vec::new();
     check_file(parsed.iter().find(|f| f.path == target).unwrap(), &compiled, &ctx, &mut out);
     out.into_iter().map(|v| (v.line, v.column, v.message)).collect()
@@ -238,7 +238,7 @@ fn unused_registry_entries_are_found_across_files() {
     let compiled = CompiledRule::new("r", &r).unwrap();
     let index = ClassIndex::default();
     let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-    let ctx = Project { index: &index, aliases: &aliases, modules: &crate::modules::Modules::default(), paths: &paths, docs: &docs };
+    let ctx = Project { index: &index, aliases: &aliases, resolvers: &crate::adapters::Resolvers::default(), paths: &paths, docs: &docs };
     let unused = unused_registry_entries(&compiled, files[1..].iter(), &ctx);
     assert_eq!(unused.len(), 1);
     assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call passes it"));
@@ -629,14 +629,10 @@ fn imports_in(path: &str, source: &str, files: &[&str], go: &[(&str, &str)], for
     let compiled = CompiledRule::new("r", &r).unwrap();
     let paths = project(files);
     let list: Vec<String> = files.iter().map(|f| f.to_string()).collect();
-    let modules = crate::modules::Modules {
-        go: crate::modules::GoModules::for_test(go),
-        py: crate::modules::PythonRoots::load(&BTreeMap::new(), &list),
-        ..Default::default()
-    };
+    let resolvers = crate::adapters::Resolvers::for_test(go, &list);
     let docs = BTreeMap::new();
     let aliases = BTreeMap::new();
-    let ctx = Project { index: &index, aliases: &aliases, modules: &modules, paths: &paths, docs: &docs };
+    let ctx = Project { index: &index, aliases: &aliases, resolvers: &resolvers, paths: &paths, docs: &docs };
     let mut out = Vec::new();
     check_file(&file, &compiled, &ctx, &mut out);
     out.into_iter().map(|v| v.message).collect()

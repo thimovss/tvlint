@@ -108,8 +108,8 @@ rules:
   adapters-depend-on-config-and-project:
     language: rust
     forbid_import: ["crate::**"]
-    except_import: ["crate::adapters::**", "crate::adapters", "crate::config::**", "crate::config", "crate::check::Project"]
-    rationale: An adapter answers questions about a syntax tree. It must not depend on the engine, the commands or the suppression logic built on top of it.
+    except_import: ["crate::adapters::**", "crate::adapters", "crate::config::**", "crate::config", "crate::data::**", "crate::data", "crate::source::**", "crate::source", "crate::check::Project"]
+    rationale: An adapter answers questions about a syntax tree, and reads the project files its language keeps (tsconfig.json, go.mod, pyproject.toml). It may use the data and source modules below it, but must not depend on the engine, the commands or the suppression logic built on top of it.
     fix: Pass what the adapter needs in as an argument, or move the shared type down.
 
   engine-depends-on-adapters-and-source:
