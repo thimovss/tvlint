@@ -1,0 +1,18 @@
+# Shared components must not import feature code
+# Shared code lives below the features. Anything outside the shared folders is a feature,
+# so this lists what shared components MAY import and forbids the rest of the project.
+
+aliases:
+  "@/": "src/"
+
+rules:
+  shared-components-no-feature-imports:
+    language: [javascript, typescript]
+    forbid_import: ["src/**"]
+    except_import: ["src/components/**", "src/hooks/**", "src/utils/**", "src/contexts/**", "src/api.ts"]
+    rationale: A shared component that imports a feature makes the feature impossible to change or remove without touching shared code, and invites import cycles.
+    fix: Pass the feature's output in as props or children, or move the component into the feature.
+
+scopes:
+  - rules: [shared-components-no-feature-imports]
+    include: ["src/components/*.tsx"]

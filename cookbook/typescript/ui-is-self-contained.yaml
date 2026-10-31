@@ -1,0 +1,21 @@
+# The design system must not import application code
+# A folder that may only import from itself (and from packages) cannot depend on features,
+# hooks or utils. forbid_import matches project paths, except_import lists what is allowed.
+#
+# "aliases" tells prlint that "@/" means "src/", as in tsconfig.json "paths". Without it,
+# "@/hooks/x" would not be seen as the project path src/hooks/x.
+
+aliases:
+  "@/": "src/"
+
+rules:
+  ui-is-self-contained:
+    language: [javascript, typescript]
+    forbid_import: ["src/**"]
+    except_import: ["src/components/ui/**"]
+    rationale: The design system sits below the application. A component that imports app code cannot be reused or tested on its own.
+    fix: Pass the value in as a prop, or move the shared code into the design system folder.
+
+scopes:
+  - rules: [ui-is-self-contained]
+    include: ["src/components/ui/**"]

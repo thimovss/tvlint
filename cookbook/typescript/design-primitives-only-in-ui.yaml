@@ -1,0 +1,16 @@
+# Use the design-system wrappers, not the primitive library
+# Features import Button, Dialog and so on from the design system folder. Only that folder
+# may import the underlying library, so styling and behaviour stay in one place.
+# List a package and its subpaths separately: "pkg" and "pkg/**".
+
+rules:
+  design-primitives-only-in-ui:
+    language: [javascript, typescript]
+    forbid_import: ["@base-ui/react", "@base-ui/react/**", "react-aria-components", "react-aria-components/**"]
+    rationale: The primitive library is the design system's building block. Using it directly in a feature bypasses the system's styling and accessibility defaults, and makes the library hard to replace.
+    fix: Use, or add, the wrapper in src/components/ui instead of importing the primitive library.
+
+scopes:
+  - rules: [design-primitives-only-in-ui]
+    include: ["src/**"]
+    exclude: ["src/components/ui/**"]

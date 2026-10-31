@@ -104,11 +104,25 @@ scopes:
 | `forbid_raise` | Exception names that may not be raised (`throw` in JavaScript and TypeScript, where `throw new Foo()` names `Foo`). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
 | `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. Imports and aliases are not resolved. |
 | `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
+| `forbid_import` | JavaScript and TypeScript. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). |
+| `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. |
+| `forbid_element` | JavaScript and TypeScript. JSX element names that may not be used, e.g. `[button, textarea]`. Matched on the tag as written, so `button` does not match `Button`. |
+| `forbid_property` | JavaScript and TypeScript. Object-literal property names that may not appear (`{ onError: ... }`). JSX attributes such as `<img onError={...}>` are not properties. |
+| `property_value` | JavaScript and TypeScript. Constraints on the value of object-literal properties: `names` (required), then `forbid_literal: true` (the value may not be a string literal) and/or `array_starts_with: accountID` (an array-literal value must start with that element; other values are not checked). `in_call: toast.add` limits it to objects passed directly to that call. |
+| `within_property` | JavaScript and TypeScript. Narrows `forbid_call`, `forbid_raise` and `forbid_element` to hits that sit inside an object-literal property with one of these names, e.g. `onError`. |
 | `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
 | `fix` | Required. How to comply. Printed with every violation. |
 
 A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`. Unknown keys are rejected.
+
+### Top-level keys
+
+| Key | Meaning |
+|---|---|
+| `rules` | Required. The rules, by id. |
+| `scopes` | Required. Which files each rule runs on. |
+| `aliases` | Optional. Import prefixes that stand for a project path, such as the `paths` entry of a `tsconfig.json`: `"@/": "src/"` turns `@/api` into `src/api`. Needed for `forbid_import` rules to see where an aliased import leads. The prefix and the path must both end with `/`, or neither. |
 
 ### Scope keys
 

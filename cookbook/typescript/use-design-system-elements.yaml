@@ -1,0 +1,16 @@
+# Use the design system's components, not raw HTML elements
+# Names are matched as written, so `button` is the HTML element and `Button` is not flagged.
+# `input` is left out: a hidden <input type="file"> behind an upload button has no
+# design-system equivalent, and a rule cannot tell it from a text field. Add it if you have none.
+
+rules:
+  use-design-system-elements:
+    language: [javascript, typescript]
+    forbid_element: [button, textarea, select]
+    rationale: Raw form elements skip the design system's styling, focus handling and accessibility behaviour, so they look and behave differently from the rest of the app.
+    fix: Use Button, Textarea or Select from the design system. For a button that must look like plain text, use a Button variant.
+
+scopes:
+  - rules: [use-design-system-elements]
+    include: ["src/**"]
+    exclude: ["src/components/ui/**"]

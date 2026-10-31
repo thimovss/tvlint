@@ -1,0 +1,16 @@
+# Do not toast API failures a second time
+# If a central place (the API client) already shows the error, a toast in onError shows it
+# twice. within_property limits the check to calls inside a property named onError, so a
+# toast in onSuccess, or on its own, is left alone. Keep onError for undoing local state.
+
+rules:
+  no-toast-in-on-error:
+    language: [javascript, typescript]
+    forbid_call: [toast.add]
+    within_property: [onError]
+    rationale: API failures are already toasted once, centrally. A second toast in onError shows the same failure twice.
+    fix: Remove the toast. Use onError only to undo local state, or drop it.
+
+scopes:
+  - rules: [no-toast-in-on-error]
+    include: ["src/**"]

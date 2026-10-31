@@ -8,6 +8,12 @@ use tree_sitter::Node;
 
 use crate::config::Language;
 
+/// An object-literal property: `key: value`, a shorthand `{ key }`, or a method `key() {}`.
+pub struct Property<'t> {
+    pub key: String,
+    pub value: Option<Node<'t>>,
+}
+
 pub trait Adapter: Sync {
     /// If `node` raises/throws an exception, the name of what is raised.
     fn raised_name(&self, node: Node, src: &str) -> Option<String>;
@@ -17,6 +23,36 @@ pub trait Adapter: Sync {
 
     /// If `node` is an exception handler, the names of the types it catches.
     fn caught_types(&self, _node: Node, _src: &str) -> Option<Vec<String>> {
+        None
+    }
+
+    /// If `node` imports a module, the specifier as written, e.g. `@/api` or `react`.
+    fn import_specifier(&self, _node: Node, _src: &str) -> Option<String> {
+        None
+    }
+
+    /// If `node` opens a JSX element, its name as written, e.g. `button` or `Foo.Bar`.
+    fn element_name(&self, _node: Node, _src: &str) -> Option<String> {
+        None
+    }
+
+    /// If `node` is a property of an object literal, its key and value.
+    fn object_property<'t>(&self, _node: Node<'t>, _src: &str) -> Option<Property<'t>> {
+        None
+    }
+
+    /// If `node` is passed directly as an argument of a call, the callee as written.
+    fn argument_of_call(&self, _node: Node, _src: &str) -> Option<String> {
+        None
+    }
+
+    /// Whether `node` is a string literal (a template literal without substitutions counts).
+    fn is_string_literal(&self, _node: Node, _src: &str) -> bool {
+        false
+    }
+
+    /// If `node` is an array literal, its elements.
+    fn array_elements<'t>(&self, _node: Node<'t>) -> Option<Vec<Node<'t>>> {
         None
     }
 
@@ -192,6 +228,110 @@ impl Adapter for EcmaScript {
             _ => None,
         }
     }
+
+    /// `import x from "m"`, `export * from "m"`, `import("m")`, `require("m")` and `import x = require("m")`.
+    fn import_specifier(&self, node: Node, src: &str) -> Option<String> {
+        match node.kind() {
+            "import_statement" | "export_statement" => {
+                Self::string_value(node.child_by_field_name("source")?, src)
+            }
+            "import_require_clause" => {
+                let mut cursor = node.walk();
+                let source = node.named_children(&mut cursor).find(|c| c.kind() == "string")?;
+                Self::string_value(source, src)
+            }
+            "call_expression" => {
+                let function = node.child_by_field_name("function")?;
+                let is_import = function.kind() == "import"
+                    || (function.kind() == "identifier" && text(function, src) == "require");
+                if !is_import {
+                    return None;
+                }
+                let arguments = node.child_by_field_name("arguments")?;
+                let first = first_named_child(arguments)?;
+                Self::string_value(first, src)
+            }
+            _ => None,
+        }
+    }
+
+    fn element_name(&self, node: Node, src: &str) -> Option<String> {
+        if !matches!(node.kind(), "jsx_opening_element" | "jsx_self_closing_element") {
+            return None;
+        }
+        Some(text(node.child_by_field_name("name")?, src).to_string())
+    }
+
+    /// Only object literals: JSX attributes such as `onError={...}` are not properties.
+    fn object_property<'t>(&self, node: Node<'t>, src: &str) -> Option<Property<'t>> {
+        match node.kind() {
+            "pair" => Some(Property {
+                key: Self::key_name(node.child_by_field_name("key")?, src)?,
+                value: node.child_by_field_name("value"),
+            }),
+            "shorthand_property_identifier" => Some(Property { key: text(node, src).to_string(), value: None }),
+            "method_definition" if node.parent().is_some_and(|p| p.kind() == "object") => Some(Property {
+                key: Self::key_name(node.child_by_field_name("name")?, src)?,
+                value: None,
+            }),
+            _ => None,
+        }
+    }
+
+    fn argument_of_call(&self, node: Node, src: &str) -> Option<String> {
+        let arguments = node.parent().filter(|p| p.kind() == "arguments")?;
+        self.call_name(arguments.parent()?, src)
+    }
+
+    fn is_string_literal(&self, node: Node, src: &str) -> bool {
+        Self::string_value(node, src).is_some()
+    }
+
+    fn array_elements<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {
+        // `[...] as const` and `([...])` are still the array.
+        let mut node = node;
+        while matches!(node.kind(), "as_expression" | "satisfies_expression" | "parenthesized_expression") {
+            node = first_named_child(node)?;
+        }
+        if node.kind() != "array" {
+            return None;
+        }
+        let mut cursor = node.walk();
+        Some(node.named_children(&mut cursor).filter(|c| c.kind() != "comment").collect())
+    }
+}
+
+impl EcmaScript {
+    /// The text between the quotes of a plain string, or of a template literal without `${}`.
+    fn string_value(node: Node, src: &str) -> Option<String> {
+        match node.kind() {
+            "string" => {
+                let raw = text(node, src);
+                raw.get(1..raw.len().checked_sub(1)?).map(str::to_string)
+            }
+            "template_string" if !has_substitution(node) => {
+                let raw = text(node, src);
+                raw.get(1..raw.len().checked_sub(1)?).map(str::to_string)
+            }
+            _ => None,
+        }
+    }
+
+    /// `foo`, `"foo"` and `'foo'` all name the key `foo`.
+    fn key_name(node: Node, src: &str) -> Option<String> {
+        match node.kind() {
+            "property_identifier" | "identifier" | "private_property_identifier" | "number" => {
+                Some(text(node, src).to_string())
+            }
+            "string" => Self::string_value(node, src),
+            _ => None,
+        }
+    }
+}
+
+fn has_substitution(node: Node) -> bool {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).any(|c| c.kind() == "template_substitution")
 }
 
 fn es_dotted_name(node: Node, src: &str) -> Option<String> {

@@ -13,12 +13,19 @@ use crate::source;
 const TOP_KEYS: &[(&str, &str)] = &[
     ("rules", "mapping of rule id to rule definition"),
     ("scopes", "list of entries that say which files each rule runs on"),
+    ("aliases", "optional; import prefix to project path, e.g. `\"@/\": \"src/\"`"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
     ("language", "`python`, `javascript` or `typescript`, or a list of them; required with forbid_* checks"),
     ("forbid_raise", "list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
     ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`"),
     ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
+    ("forbid_import", "JS/TS; module specifiers that must not be imported; relative and aliased imports match by project path"),
+    ("except_import", "JS/TS; imports that are fine although they match forbid_import"),
+    ("forbid_element", "JS/TS; JSX element names that must not be used, e.g. `button`"),
+    ("forbid_property", "JS/TS; object-literal property names that must not appear"),
+    ("property_value", "JS/TS; `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`"),
+    ("within_property", "JS/TS; only count call, raise and element hits inside a property with one of these names"),
     ("require_filename", "list of file name globs; any matched file whose name matches none is a violation"),
     ("rationale", "required; why the rule exists, shown with every violation"),
     ("fix", "required; how to comply, shown with every violation"),
@@ -161,19 +168,7 @@ fn check_against_project(
             );
         }
 
-        let mut forbids = Vec::new();
-        if !rule.forbid_raise.is_empty() {
-            forbids.push(format!("raising {}", rule.forbid_raise.join(", ")));
-        }
-        if !rule.forbid_call.is_empty() {
-            forbids.push(format!("calling {}", rule.forbid_call.join(", ")));
-        }
-        if let Some(catch) = &rule.forbid_catch {
-            forbids.push(format!("catching {} or its subclasses", catch.subclass_of));
-        }
-        if !rule.require_filename.is_empty() {
-            forbids.push(format!("file names other than {}", rule.require_filename.join(", ")));
-        }
+        let forbids = rule.describe_checks();
         summaries.push(RuleSummary {
             id: id.clone(),
             language: rule.language_label(),
@@ -236,6 +231,9 @@ fn validate_structure(root: &Value, report: &mut Report) -> BTreeSet<String> {
         return referenced;
     };
     check_keys(top, "", TOP_KEYS, report);
+    if let Some(aliases) = top.get("aliases") {
+        validate_aliases(aliases, report);
+    }
 
     let mut rule_ids = BTreeSet::new();
     match top.get("rules") {
@@ -279,13 +277,23 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     };
     check_keys(rule, path, RULE_KEYS, report);
 
-    let has_code_checks = ["forbid_raise", "forbid_call", "forbid_catch"].iter().any(|k| rule.get(*k).is_some());
+    let has_code_checks = [
+        "forbid_raise",
+        "forbid_call",
+        "forbid_catch",
+        "forbid_import",
+        "forbid_element",
+        "forbid_property",
+        "property_value",
+    ]
+    .iter()
+    .any(|k| rule.get(*k).is_some());
     let languages = match rule.get("language") {
         None if has_code_checks => {
             report.error(
                 path,
                 "missing required key `language`",
-                Some(format!("add `language: {}`; it is required by forbid_raise, forbid_call and forbid_catch", LANGUAGES[0])),
+                Some(format!("add `language: {}`; it is required by every check except require_filename", LANGUAGES[0])),
             );
             Vec::new()
         }
@@ -342,12 +350,145 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
             }
         }
     }
+    validate_ecmascript_keys(rule, path, &languages, &mut checks, report);
     if checks == 0 {
         report.error(
             path,
             "the rule has no checks, so it can never report anything",
-            Some("add at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`".into()),
+            Some("add at least one check: forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value or require_filename".into()),
         );
+    }
+}
+
+fn validate_aliases(value: &Value, report: &mut Report) {
+    let Some(map) = expect_mapping(value, "aliases", "a mapping like `\"@/\": \"src/\"`", report) else { return };
+    for (key, target) in map {
+        let (Some(prefix), Some(target)) = (key.as_str(), target.as_str()) else {
+            report.error("aliases", "aliases map a prefix string to a project path string", None);
+            continue;
+        };
+        let path = format!("aliases.{prefix}");
+        if prefix.is_empty() || target.is_empty() {
+            report.error(&path, "the prefix and the path must not be empty", None);
+        } else if prefix.ends_with('/') != target.ends_with('/') {
+            report.error(
+                &path,
+                format!("`{prefix}` and `{target}` must both end with `/`, or neither"),
+                Some("the prefix is replaced by the path, so `\"@/\": \"src/\"` turns `@/api` into `src/api`".into()),
+            );
+        }
+    }
+}
+
+/// The JS/TS-only keys: forbid_import, except_import, forbid_element, forbid_property, property_value, within_property.
+fn validate_ecmascript_keys(rule: &Mapping, path: &str, languages: &[String], checks: &mut usize, report: &mut Report) {
+    const KEYS: &[&str] = &[
+        "forbid_import",
+        "except_import",
+        "forbid_element",
+        "forbid_property",
+        "property_value",
+        "within_property",
+    ];
+    let present: Vec<&str> = KEYS.iter().copied().filter(|k| rule.get(*k).is_some()).collect();
+    if present.is_empty() {
+        return;
+    }
+    if languages.iter().any(|l| l == "python") {
+        report.error(
+            &format!("{path}.{}", present[0]),
+            format!("{} {} only supported for JavaScript and TypeScript", present.join(", "), if present.len() == 1 { "is" } else { "are" }),
+            Some("set `language: [javascript, typescript]`, or split the Python checks into their own rule".into()),
+        );
+    }
+    for key in ["forbid_import", "except_import"] {
+        if let Some(value) = rule.get(key) {
+            if key == "forbid_import" {
+                *checks += 1;
+            }
+            glob_list(value, &format!("{path}.{key}"), report);
+        }
+    }
+    if rule.get("except_import").is_some() && rule.get("forbid_import").is_none() {
+        report.error(&format!("{path}.except_import"), "except_import has nothing to except without forbid_import", Some("add forbid_import, or remove except_import".into()));
+    }
+    if let Some(value) = rule.get("forbid_element") {
+        *checks += 1;
+        let element_path = format!("{path}.forbid_element");
+        for (i, pattern) in string_list(value, &element_path, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{element_path}[{i}]"), format!("invalid pattern `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    }
+    if let Some(value) = rule.get("forbid_property") {
+        *checks += 1;
+        string_list(value, &format!("{path}.forbid_property"), report);
+    }
+    if let Some(value) = rule.get("within_property") {
+        string_list(value, &format!("{path}.within_property"), report);
+        if ["forbid_call", "forbid_raise", "forbid_element"].iter().all(|k| rule.get(*k).is_none()) {
+            report.error(
+                &format!("{path}.within_property"),
+                "within_property has nothing to narrow",
+                Some("it applies to forbid_call, forbid_raise and forbid_element".into()),
+            );
+        }
+    }
+    if let Some(value) = rule.get("property_value") {
+        *checks += 1;
+        validate_property_value(value, &format!("{path}.property_value"), report);
+    }
+}
+
+fn validate_property_value(value: &Value, path: &str, report: &mut Report) {
+    const KEYS: &[(&str, &str)] = &[
+        ("names", "required; property name or list of names to look at"),
+        ("in_call", "optional; only objects passed directly to one of these calls, e.g. `toast.add`"),
+        ("forbid_literal", "true: the value must not be a string literal"),
+        ("array_starts_with", "an array-literal value must start with this element, e.g. `accountID`"),
+    ];
+    let Some(map) = expect_mapping(value, path, "a mapping with `names` and a constraint", report) else { return };
+    check_keys(map, path, KEYS, report);
+    match map.get("names") {
+        None => report.error(path, "missing required key `names`", Some("add `names: [queryKey]`".into())),
+        Some(v) => {
+            string_or_list(v, &format!("{path}.names"), report);
+        }
+    }
+    if let Some(v) = map.get("in_call") {
+        string_or_list(v, &format!("{path}.in_call"), report);
+    }
+    let literal = match map.get("forbid_literal") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(other) => {
+            report.error(&format!("{path}.forbid_literal"), format!("expected true or false, found {}", describe(other)), None);
+            false
+        }
+    };
+    let starts = match map.get("array_starts_with") {
+        None => false,
+        Some(Value::String(s)) if !s.trim().is_empty() => true,
+        Some(other) => {
+            report.error(&format!("{path}.array_starts_with"), format!("expected the text of the first element, found {}", describe(other)), None);
+            false
+        }
+    };
+    if !literal && !starts && !report.errors.iter().any(|d| d.path.starts_with(path)) {
+        report.error(path, "the property_value has no constraint", Some("add `forbid_literal: true` or `array_starts_with: <element>`".into()));
+    }
+}
+
+/// A string or a list of strings.
+fn string_or_list(value: &Value, path: &str, report: &mut Report) -> Vec<String> {
+    match value {
+        Value::String(s) if !s.trim().is_empty() => vec![s.clone()],
+        Value::Sequence(_) => string_list(value, path, report),
+        other => {
+            report.error(path, format!("expected a name or a list of names, found {}", describe(other)), None);
+            Vec::new()
+        }
     }
 }
 
@@ -618,6 +759,69 @@ scopes:
         assert!(has(&found, "rules.no-http.forbid_catch", "only supported for python"), "{found:?}");
         let ok = GOOD.replace("forbid_raise: [HTTPException]", "forbid_catch: { subclass_of: AppError }");
         assert!(errors(&ok).is_empty());
+    }
+
+    const ES_RULE: &str = r#"
+rules:
+  r:
+    language: typescript
+    rationale: why
+    fix: how
+scopes:
+  - rules: [r]
+    include: ["src/**"]
+"#;
+
+    fn es(extra: &str) -> Vec<(String, String)> {
+        errors(&ES_RULE.replace("    fix: how\n", &format!("    fix: how\n{extra}")))
+    }
+
+    #[test]
+    fn accepts_the_javascript_checks() {
+        for extra in [
+            "    forbid_import: [\"@base-ui/react/**\"]\n    except_import: [\"src/ui/**\"]\n",
+            "    forbid_element: [button, input]\n",
+            "    forbid_property: [onError]\n",
+            "    forbid_call: [toast.add]\n    within_property: [onError]\n",
+            "    property_value: { names: queryKey, array_starts_with: accountID }\n",
+            "    property_value: { names: [title], in_call: toast.add, forbid_literal: true }\n",
+        ] {
+            assert!(es(extra).is_empty(), "{extra}: {:?}", es(extra));
+        }
+    }
+
+    #[test]
+    fn rejects_bad_javascript_checks() {
+        let found = es("    except_import: [\"src/**\"]\n");
+        assert!(has(&found, "rules.r.except_import", "nothing to except"), "{found:?}");
+        let found = es("    forbid_import: [\"src/[\"]\n");
+        assert!(has(&found, "rules.r.forbid_import[0]", "invalid glob"), "{found:?}");
+        let found = es("    within_property: [onError]\n    forbid_property: [x]\n");
+        assert!(has(&found, "rules.r.within_property", "nothing to narrow"), "{found:?}");
+        let found = es("    property_value: { names: queryKey }\n");
+        assert!(has(&found, "rules.r.property_value", "no constraint"), "{found:?}");
+        let found = es("    property_value: { array_starts_with: a }\n");
+        assert!(has(&found, "rules.r.property_value", "missing required key `names`"), "{found:?}");
+        let found = es("    property_value: { names: x, forbid_litral: true }\n");
+        assert!(has(&found, "rules.r.property_value.forbid_litral", "unknown key"), "{found:?}");
+    }
+
+    #[test]
+    fn javascript_checks_are_rejected_for_python() {
+        let yaml = ES_RULE.replace("language: typescript", "language: [python, typescript]").replace(
+            "    fix: how\n",
+            "    fix: how\n    forbid_import: [x]\n",
+        );
+        let found = errors(&yaml);
+        assert!(has(&found, "rules.r.forbid_import", "only supported for JavaScript and TypeScript"), "{found:?}");
+    }
+
+    #[test]
+    fn aliases_must_agree_on_the_trailing_slash() {
+        let yaml = format!("aliases:\n  \"@/\": src\n{GOOD}");
+        let found = errors(&yaml);
+        assert!(has(&found, "aliases.@/", "must both end with"), "{found:?}");
+        assert!(errors(&format!("aliases:\n  \"@/\": src/\n{GOOD}")).is_empty());
     }
 
     #[test]

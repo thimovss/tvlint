@@ -1,0 +1,18 @@
+# Toast text must come from the translation function
+# property_value looks at the value of an object property. With in_call it only looks at
+# objects passed directly to that call, so other objects with a `title` are left alone.
+# Template literals with ${} and calls such as t("key") are not literals.
+
+rules:
+  toasts-are-translated:
+    language: [javascript, typescript]
+    property_value:
+      names: [title, description]
+      in_call: toast.add
+      forbid_literal: true
+    rationale: A string literal in a toast is never translated, so users with another language see English.
+    fix: 'Use t("some_key") with a static key and add it to the locale files.'
+
+scopes:
+  - rules: [toasts-are-translated]
+    include: ["src/**"]

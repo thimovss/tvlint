@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use check::{ClassIndex, CompiledRule, Violation, check_file, check_filename};
+use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename};
 use config::Config;
 use scope::CompiledScope;
 
@@ -89,6 +89,9 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         None
     };
     let index = ClassIndex::build(&files);
+    let all_paths = source::list_all(&root)?;
+    let known_paths: std::collections::HashSet<String> = all_paths.iter().cloned().collect();
+    let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths };
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {
@@ -113,11 +116,10 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         if file.has_syntax_errors() {
             eprintln!("prlint: warning: {} has syntax errors, results may be incomplete", file.path);
         }
-        check_file(file, &rules[id], &index, &mut violations);
+        check_file(file, &rules[id], &ctx, &mut violations);
     }
 
     // File-name rules look at every file, not only the ones we can parse.
-    let all_paths = source::list_all(&root)?;
     let mut name_jobs: BTreeSet<(&str, &str)> = BTreeSet::new();
     for path in &all_paths {
         if staged_paths.as_ref().is_some_and(|paths| !paths.contains(path)) {
@@ -168,18 +170,9 @@ fn explain(config_path: &Path, id: &str) -> Result<()> {
     println!("{id} ({})\n", rule.language_label());
     println!("Why:  {}", rule.rationale.trim());
     println!("Fix:  {}\n", rule.fix.trim());
-    println!("Forbids:");
-    if !rule.forbid_raise.is_empty() {
-        println!("  raising {}", rule.forbid_raise.join(", "));
-    }
-    if !rule.forbid_call.is_empty() {
-        println!("  calling {}", rule.forbid_call.join(", "));
-    }
-    if let Some(catch) = &rule.forbid_catch {
-        println!("  catching {} or its subclasses", catch.subclass_of);
-    }
-    if !rule.require_filename.is_empty() {
-        println!("  file names other than {}", rule.require_filename.join(", "));
+    println!("Checks:");
+    for line in rule.describe_checks() {
+        println!("  {line}");
     }
     println!("\nApplies to:");
     let mut applied = false;
