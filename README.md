@@ -1,5 +1,7 @@
 # TVLint
 
+[![TVLint](https://github.com/thimovss/tvlint-poc/actions/workflows/tvlint.yml/badge.svg)](https://github.com/thimovss/tvlint-poc/actions/workflows/tvlint.yml)
+
 Enforce your team's code rules deterministically. Rules live in a YAML file, violations come back with a reason and a fix so both humans and AI agents can act on them.
 
 Supports Python, JavaScript, TypeScript and Rust.
@@ -118,6 +120,34 @@ tvl check --format sarif > tvl.sarif
 ```
 
 To show violations as annotations on pull requests, upload the SARIF file with GitHub's `github/codeql-action/upload-sarif` step.
+
+### Running in GitHub Actions
+
+A job that runs `tvl check` fails when there are violations (exit code 1), so the workflow is green or red on its own:
+
+```yaml
+name: TVLint
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  tvl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tvl check   # install tvl first, see Install
+```
+
+### Badge
+
+GitHub draws a pass/fail badge for any workflow, so there is nothing to host. Put this in your README, replacing `OWNER/REPO` and the file name (`tvlint.yml`) with your own:
+
+```markdown
+[![TVLint](https://github.com/OWNER/REPO/actions/workflows/tvlint.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/tvlint.yml)
+```
+
+It shows the state of the latest run on the default branch. Add `?branch=main` to the image URL to pin a branch, or `?event=push` to ignore pull request runs.
 
 ## Suppressing violations
 
