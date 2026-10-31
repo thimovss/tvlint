@@ -53,7 +53,7 @@ Violations go to stdout, one per rule hit:
 ```
 backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raising `ValueError` is forbidden
     why: One global handler produces every error body. Ad-hoc responses bypass the code system.
-    fix: Raise a LocusException subclass. A new HTTP status needs a new subclass, not an inline response.
+    fix: Raise a ExampleException subclass. A new HTTP status needs a new subclass, not an inline response.
 ```
 
 ## Config
@@ -65,9 +65,9 @@ rules:
   no-http-exceptions:
     language: python
     forbid_raise: [HTTPException, ValueError]
-    forbid_catch: { subclass_of: LocusException }
+    forbid_catch: { subclass_of: ExampleException }
     rationale: One global handler produces every error body.
-    fix: Raise a LocusException subclass.
+    fix: Raise a ExampleException subclass.
 
 scopes:
   - rules: [no-http-exceptions]

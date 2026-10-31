@@ -291,9 +291,9 @@ mod tests {
 
     #[test]
     fn flags_catch_of_transitive_subclass() {
-        let src = "class LocusException(Exception): pass\nclass Mid(LocusException): pass\nclass Leaf(Mid): pass\n\
+        let src = "class ExampleException(Exception): pass\nclass Mid(ExampleException): pass\nclass Leaf(Mid): pass\n\
 try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, mod.Mid):\n    pass\ntry:\n    pass\nexcept KeyError:\n    pass\n";
-        let hits = run(src, &rule(&[], &[], Some("LocusException")));
+        let hits = run(src, &rule(&[], &[], Some("ExampleException")));
         assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), [6, 10]);
     }
 
