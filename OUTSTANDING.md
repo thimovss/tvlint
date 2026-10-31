@@ -19,7 +19,3 @@ Done items are removed from this list.
    - an expiry-date check for feature flags (depends on the clock, so results would vary)
    - a rule type that runs a command, which would let a rule check README or cookbook sync
 9. **Rust and Python.** Calls inside Rust macro arguments are invisible. A Rust rule cannot separate `#[cfg(test)]` code from other code in the same file. Python has no import rules yet.
-
-## Product brief versus reality
-
-- A mandatory reason on suppressions. Today `tvlint-ignore-next-line` takes an optional reason, and the brief calls for a required one.

@@ -34,7 +34,7 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
   3. **Required patterns:** endpoints must carry an auth decorator
   4. **File relationships:** `*.service.ts` requires a sibling `*.service.test.ts`
 - Output formats: human-readable, JSON, SARIF (for GitHub code scanning)
-- Inline suppressions with a mandatory reason
+- Inline suppressions (`tvlint-ignore-next-line`, `tvlint-ignore-file`) with an optional reason
 
 **Out of scope for MVP:** LLM-evaluated rules, rule mining, hosted dashboard, IDE plugin, additional languages.
 
