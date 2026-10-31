@@ -439,14 +439,21 @@ impl Config {
                 .map(|(_, aliases)| aliases.clone())
                 .unwrap_or_default();
             aliases.extend(nested.aliases);
+            // A nested rule is known by its directory and its id (`web/no-print`), so ids only
+            // have to be unique within one config.
+            let global = |id: &str| format!("{dir}/{id}");
             for (id, rule) in nested.rules {
+                let id = global(&id);
                 if let Some(first) = config.origins.get(&id) {
-                    bail!("rule `{id}` is defined in {} and in {file}; rule ids must be unique across configs", first.file());
+                    bail!("rule `{id}` is defined in {} and in {file}", first.file());
                 }
                 config.origins.insert(id.clone(), Origin { dir: dir.clone(), aliases: aliases.clone() });
                 config.rules.insert(id, rule);
             }
-            config.scopes.extend(nested.scopes);
+            for mut scope in nested.scopes {
+                scope.rules = scope.rules.iter().map(|id| global(id)).collect();
+                config.scopes.push(scope);
+            }
             in_effect.push((dir, aliases));
         }
         Ok(config)

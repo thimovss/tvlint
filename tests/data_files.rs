@@ -288,20 +288,33 @@ scopes:
     let found = violations(&out);
     // The root rule reaches everything; the nested rules only src/ of svc/, minus src/legacy/.
     assert_eq!(found, ["svc/src/a.py:1:1", "svc/src/a.py:2:1", "svc/src/a.py:4:6", "top/d.py:2:1"], "{}", stdout(&out));
+    assert!(stdout(&out).contains("error[svc/no-eval]") && stdout(&out).contains("error[no-print]"), "{}", stdout(&out));
 
     let listed = stdout(&p.tvl(&["list"]));
-    assert!(listed.contains("no-eval") && listed.contains("no-print"), "{listed}");
-    assert!(stdout(&p.tvl(&["explain", "no-eval"])).contains("From: svc/tvlint.yaml"));
+    assert!(listed.contains("svc/no-eval") && listed.contains("svc/codes-registered") && listed.contains("no-print"), "{listed}");
+    assert!(stdout(&p.tvl(&["explain", "svc/no-eval"])).contains("From: svc/tvlint.yaml"));
     let validated = p.tvl(&["validate"]);
     assert_eq!(exit(&validated), 0, "{}", stdout(&validated));
     assert!(stdout(&validated).contains("svc/tvlint.yaml: VALID"), "{}", stdout(&validated));
 }
 
 #[test]
-fn rule_ids_must_be_unique_across_configs() {
-    let p = Project::new("nested-dup", &[("tvlint.yaml", NO_PRINT), ("svc/tvlint.yaml", NO_PRINT)]);
-    let out = p.tvl(&[]);
-    assert_eq!(exit(&out), 2);
-    assert!(stderr(&out).contains("`no-print` is defined in tvlint.yaml and in svc/tvlint.yaml"), "{}", stderr(&out));
-    assert_eq!(exit(&p.tvl(&["validate"])), 1);
+fn the_same_rule_id_may_be_used_in_several_configs() {
+    let p = Project::new(
+        "nested-dup",
+        &[
+            ("tvlint.yaml", NO_PRINT),
+            ("a/tvlint.yaml", NO_PRINT),
+            ("b/tvlint.yaml", NO_PRINT),
+            ("a/x.py", "print(1)\n"),
+            ("b/y.py", "print(2)\n"),
+        ],
+    );
+    let out = p.tvl(&["check", "--format", "json"]);
+    let text = stdout(&out);
+    // Each file is hit by the root rule and by the rule of its own directory.
+    for id in ["\"no-print\"", "\"a/no-print\"", "\"b/no-print\""] {
+        assert!(text.contains(id), "{text}");
+    }
+    assert_eq!(exit(&p.tvl(&["validate"])), 0);
 }

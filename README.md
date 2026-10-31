@@ -305,7 +305,7 @@ services/billing/
 - **Rules add up.** The root config keeps applying everywhere. A nested config adds rules that run on its own directory and below, never outside it. It cannot switch off or change a rule from above.
 - **Paths are relative to the config that contains them**: `include` and `exclude` in scopes, `same_keys_as`, `registry.file`, the targets of `aliases`, and project paths in `forbid_import` and `except_import` (a path outside the directory is written `../shared/**`). Violations are still reported relative to the project root.
 - **Aliases are inherited.** A nested config sees the aliases of the configs above it, and its own win on the same prefix. A rule uses the aliases of the config it is written in.
-- **Rule ids are unique** across all configs. Two configs defining the same id is an error, so a violation always names one rule.
+- **Rule ids only need to be unique within one config.** Outside the root config a rule is reported with its directory in front: `no-print` in `services/billing/tvlint.yaml` is `services/billing/no-print` in violations, `tvl list` and `tvl explain`. Inside the file, scopes still use the short id.
 - A `tvlint.yaml` inside a gitignored directory is not found. `tvl validate` checks every config, each against its own directory, and `tvl explain` says which file a rule comes from.
 - The root is the config you point at (`-c`, default `./tvlint.yaml`). Running `tvl` from a subdirectory with no config of its own does not look upward for one.
 
