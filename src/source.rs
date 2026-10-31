@@ -135,6 +135,29 @@ pub fn list_all(root: &Path) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+/// Config files below the project root (relative to it), parents before children. `own` is the root config itself.
+pub fn find_configs(root: &Path, own: &Path) -> Result<Vec<String>> {
+    let mut found = Vec::new();
+    for entry in walker(root).build() {
+        let entry = entry?;
+        if entry.file_type().is_some_and(|t| t.is_file()) && entry.file_name() == crate::config::FILE_NAME && entry.path() != own {
+            let relative = entry.path().strip_prefix(root).unwrap_or(entry.path()).to_string_lossy().replace('\\', "/");
+            if relative.contains('/') {
+                found.push(relative);
+            }
+        }
+    }
+    found.sort_by(|a, b| (a.matches('/').count(), a).cmp(&(b.matches('/').count(), b)));
+    Ok(found)
+}
+
+/// The config at `path` with the nested configs below its directory.
+pub fn load_config(path: &Path) -> Result<crate::config::Config> {
+    let own = std::path::absolute(path)?;
+    let root = own.parent().context("config file has no parent directory")?;
+    crate::config::Config::load_tree(path, &find_configs(root, &own)?)
+}
+
 /// Finds and parses every supported source file under `root`, honouring `.gitignore`.
 /// Files are parsed in parallel, each worker thread with parsers of its own.
 pub fn load_all(root: &Path) -> Result<Vec<SourceFile>> {

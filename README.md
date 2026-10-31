@@ -289,6 +289,26 @@ A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `r
 
 A rule that appears in no scope never runs. Files ignored by `.gitignore` are skipped.
 
+### Nested configs
+
+Any directory below the project root may hold its own `tvlint.yaml`, for a package in a monorepo or a team that owns one corner of the code:
+
+```
+tvlint.yaml              # rules for the whole repository
+services/billing/
+  tvlint.yaml            # rules for services/billing/ only
+  error_codes.json
+```
+
+`tvl check` finds them on its own; nothing needs to be listed in the root config.
+
+- **Rules add up.** The root config keeps applying everywhere. A nested config adds rules that run on its own directory and below, never outside it. It cannot switch off or change a rule from above.
+- **Paths are relative to the config that contains them**: `include` and `exclude` in scopes, `same_keys_as`, `registry.file`, the targets of `aliases`, and project paths in `forbid_import` and `except_import` (a path outside the directory is written `../shared/**`). Violations are still reported relative to the project root.
+- **Aliases are inherited.** A nested config sees the aliases of the configs above it, and its own win on the same prefix. A rule uses the aliases of the config it is written in.
+- **Rule ids are unique** across all configs. Two configs defining the same id is an error, so a violation always names one rule.
+- A `tvlint.yaml` inside a gitignored directory is not found. `tvl validate` checks every config, each against its own directory, and `tvl explain` says which file a rule comes from.
+- The root is the config you point at (`-c`, default `./tvlint.yaml`). Running `tvl` from a subdirectory with no config of its own does not look upward for one.
+
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); contributors sign a [CLA](CLA.md) so the maintainer can also offer TVLint under other terms.

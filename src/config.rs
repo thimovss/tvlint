@@ -4,6 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Deserializer};
 
+/// The name of a config file. Besides the one at the project root, any directory may hold one.
+pub const FILE_NAME: &str = "tvlint.yaml";
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -12,6 +15,26 @@ pub struct Config {
     /// Import prefixes that stand for a project path, e.g. `"@/": "src/"` for a tsconfig `paths` entry.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
+    /// Where each rule came from; filled in by `load_tree`.
+    #[serde(skip)]
+    pub origins: BTreeMap<String, Origin>,
+}
+
+/// The config a rule was written in. Its paths are relative to that config's directory, and `load_tree`
+/// has already turned the ones that name project files into paths from the project root.
+#[derive(Debug, Clone, Default)]
+pub struct Origin {
+    /// The directory of the config, relative to the project root; empty for the root config.
+    pub dir: String,
+    /// Import aliases in effect for the rule, as paths from the project root.
+    pub aliases: BTreeMap<String, String>,
+}
+
+impl Origin {
+    /// The config file the rule is written in, from the project root.
+    pub fn file(&self) -> String {
+        if self.dir.is_empty() { FILE_NAME.to_string() } else { format!("{}/{FILE_NAME}", self.dir) }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -391,6 +414,64 @@ impl Config {
         Config::parse(&text).with_context(|| format!("invalid config {}", path.display()))
     }
 
+    /// Loads the config at `path` together with the nested configs `nested` (paths from its directory, parents
+    /// before children). A nested config adds rules that apply to its own directory only, and its paths are
+    /// relative to that directory.
+    pub fn load_tree(path: &Path, nested: &[String]) -> Result<Config> {
+        let mut config = Config::load(path)?;
+        let own = std::path::absolute(path)?;
+        let root = own.parent().context("config file has no parent directory")?.to_path_buf();
+        config.origins = config
+            .rules
+            .keys()
+            .map(|id| (id.clone(), Origin { dir: String::new(), aliases: config.aliases.clone() }))
+            .collect();
+        // The aliases in effect in each directory, for nested configs to inherit; parents come before children.
+        let mut in_effect: Vec<(String, BTreeMap<String, String>)> = vec![(String::new(), config.aliases.clone())];
+        for file in nested {
+            let dir = file.rsplit_once('/').map_or("", |(dir, _)| dir).to_string();
+            let mut nested = Config::load(&root.join(file))?;
+            nested.rebase(&dir);
+            let mut aliases = in_effect
+                .iter()
+                .filter(|(d, _)| d.is_empty() || dir == *d || dir.starts_with(&format!("{d}/")))
+                .max_by_key(|(d, _)| d.len())
+                .map(|(_, aliases)| aliases.clone())
+                .unwrap_or_default();
+            aliases.extend(nested.aliases);
+            for (id, rule) in nested.rules {
+                if let Some(first) = config.origins.get(&id) {
+                    bail!("rule `{id}` is defined in {} and in {file}; rule ids must be unique across configs", first.file());
+                }
+                config.origins.insert(id.clone(), Origin { dir: dir.clone(), aliases: aliases.clone() });
+                config.rules.insert(id, rule);
+            }
+            config.scopes.extend(nested.scopes);
+            in_effect.push((dir, aliases));
+        }
+        Ok(config)
+    }
+
+    /// Turns every path that is relative to the config's directory `dir` into one from the project root.
+    fn rebase(&mut self, dir: &str) {
+        for scope in &mut self.scopes {
+            for pattern in scope.include.iter_mut().chain(&mut scope.exclude) {
+                *pattern = format!("{dir}/{}", pattern.trim_start_matches("./"));
+            }
+        }
+        for rule in self.rules.values_mut() {
+            if let Some(file) = &mut rule.same_keys_as {
+                *file = join(dir, file);
+            }
+            if let Some(arg) = &mut rule.literal_argument {
+                arg.registry.file = join(dir, &arg.registry.file);
+            }
+        }
+        for target in self.aliases.values_mut() {
+            *target = join(dir, target);
+        }
+    }
+
     pub fn parse(text: &str) -> Result<Config> {
         let config: Config = serde_yaml_ng::from_str(text)?;
         config.validate()?;
@@ -456,5 +537,33 @@ impl Config {
             }
         }
         Ok(())
+    }
+}
+
+/// `path` inside the directory `dir`, as a path from the project root; `..` and `.` are resolved and a trailing `/` is kept.
+fn join(dir: &str, path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in dir.split('/').chain(path.split('/')) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    let slash = if path.ends_with('/') { "/" } else { "" };
+    format!("{}{slash}", parts.join("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_resolves_paths_against_the_config_directory() {
+        assert_eq!(join("web", "src/"), "web/src/");
+        assert_eq!(join("a/b", "./codes.json"), "a/b/codes.json");
+        assert_eq!(join("a/b", "../shared/codes.json"), "a/shared/codes.json");
     }
 }

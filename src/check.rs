@@ -12,6 +12,7 @@ use crate::data::{self, Doc, PathPattern, Position};
 use crate::source::SourceFile;
 
 /// What a check needs to know about the rest of the project.
+#[derive(Clone, Copy)]
 pub struct Project<'a> {
     pub index: &'a ClassIndex,
     /// Import prefix -> project path, e.g. `@/` -> `src/`.
@@ -34,6 +35,8 @@ pub struct Violation {
 pub struct CompiledRule<'a> {
     pub id: &'a str,
     pub rule: &'a Rule,
+    /// The directory of the config that defines the rule, from the project root. Import patterns are relative to it.
+    base: String,
     raise: GlobSet,
     call: GlobSet,
     catch_root: Option<&'a str>,
@@ -158,6 +161,7 @@ impl<'a> CompiledRule<'a> {
                 .with_context(|| format!("rule `{id}` literal_argument"))?,
             id,
             rule,
+            base: String::new(),
             raise: compile(&rule.forbid_raise).with_context(|| format!("rule `{id}` forbid_raise"))?,
             call: compile(&rule.forbid_call).with_context(|| format!("rule `{id}` forbid_call"))?,
             catch_root: rule.forbid_catch.as_ref().map(|c| c.subclass_of.as_str()),
@@ -182,6 +186,27 @@ impl<'a> CompiledRule<'a> {
                 .with_context(|| format!("rule `{id}` property_value"))?,
         })
     }
+}
+
+impl CompiledRule<'_> {
+    /// Makes import patterns relative to `base`, the directory of the config the rule was written in.
+    pub fn in_dir(mut self, base: &str) -> Self {
+        self.base = base.to_string();
+        self
+    }
+}
+
+/// `path` relative to the directory `base` (both from the project root); `../` leads out of `base`.
+fn relative_to(base: &str, path: &str) -> String {
+    if base.is_empty() {
+        return path.to_string();
+    }
+    let base: Vec<&str> = base.split('/').collect();
+    let parts: Vec<&str> = path.split('/').collect();
+    let common = base.iter().zip(&parts).take_while(|(a, b)| a == b).count();
+    let mut out = vec![".."; base.len() - common];
+    out.extend(&parts[common..]);
+    out.join("/")
 }
 
 fn compile(patterns: &[String]) -> Result<GlobSet> {
@@ -332,7 +357,9 @@ pub fn check_file(
             // Rust writes paths with `::`; matching treats them as `/` like every other path.
             let key = |s: &str| s.replace("::", "/");
             for import in adapter.imports(node, src, &file.path, ctx) {
-                let hits = |set: &GlobSet| set.is_match(key(&import.specifier)) || set.is_match(key(&import.resolved));
+                // A package name stays as written; a project path is relative to the rule's config.
+                let resolved = if import.resolved == import.specifier { key(&import.resolved) } else { relative_to(&rule.base, &key(&import.resolved)) };
+                let hits = |set: &GlobSet| set.is_match(key(&import.specifier)) || set.is_match(&resolved);
                 if hits(&rule.import) && !hits(&rule.except_import) {
                     let target = if import.resolved == import.specifier {
                         String::new()
@@ -912,6 +939,14 @@ try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, m
 export { x } from 'pkg';\nconst m = await import('pkg');\nconst r = require('pkg');\nimport e = require('pkg');\n";
         let r = Rule { forbid_import: vec!["pkg".into()], ..ts_rule() };
         assert_eq!(lines("t.ts", src, &r), [1, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn relative_to_steps_out_of_the_base_directory() {
+        assert_eq!(relative_to("", "src/a.ts"), "src/a.ts");
+        assert_eq!(relative_to("web", "web/src/a.ts"), "src/a.ts");
+        assert_eq!(relative_to("web/app", "web/lib/a.ts"), "../lib/a.ts");
+        assert_eq!(relative_to("web", "api/a.ts"), "../api/a.ts");
     }
 
     #[test]

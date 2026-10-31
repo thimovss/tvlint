@@ -19,7 +19,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 
 use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename, normalize_file, unused_registry_entries};
-use config::Config;
 use scope::CompiledScope;
 use suppress::Suppressions;
 
@@ -89,7 +88,7 @@ fn main() -> ExitCode {
         Command::Check { paths, staged, format } => check(&cli.config, &paths, staged, format).map(|violations| u8::from(violations > 0)),
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
-        Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
+        Command::Validate => validate::run_all(&cli.config).map(|valid| u8::from(!valid)),
         Command::Init { force } => init::run(&cli.config, force).map(|()| 0),
         Command::Schema => {
             print!("{SCHEMA}");
@@ -107,7 +106,7 @@ fn main() -> ExitCode {
 
 /// Returns the number of violations found.
 fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> Result<usize> {
-    let config = Config::load(config_path)?;
+    let config = source::load_config(config_path)?;
     let root = std::path::absolute(config_path)?
         .parent()
         .map(Path::to_path_buf)
@@ -123,7 +122,7 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
     let rules = config
         .rules
         .iter()
-        .map(|(id, rule)| Ok((id.as_str(), CompiledRule::new(id, rule)?)))
+        .map(|(id, rule)| Ok((id.as_str(), CompiledRule::new(id, rule)?.in_dir(&config.origins[id].dir))))
         .collect::<Result<BTreeMap<_, _>>>()?;
     let scopes = config.scopes.iter().map(CompiledScope::new).collect::<Result<Vec<_>>>()?;
 
@@ -192,6 +191,8 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
         .par_iter()
         .map(|&(file_idx, id)| {
             let mut found = Vec::new();
+            // Import aliases belong to the config that defines the rule.
+            let ctx = Project { aliases: &config.origins[id].aliases, ..ctx };
             check_file(&files[file_idx], &rules[id], &ctx, &mut found);
             let before = found.len();
             found.retain(|v| !suppressions[file_idx].hides(v.line));
@@ -298,14 +299,19 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
 
 
 fn explain(config_path: &Path, id: &str) -> Result<()> {
-    let config = Config::load(config_path)?;
+    let config = source::load_config(config_path)?;
     let Some(rule) = config.rules.get(id) else {
         let known: Vec<&str> = config.rules.keys().map(String::as_str).collect();
         bail!("unknown rule `{id}`; known rules: {}", known.join(", "));
     };
     println!("{id} ({})\n", rule.language_label());
     println!("Why:  {}", rule.rationale.trim());
-    println!("Fix:  {}\n", rule.fix.trim());
+    println!("Fix:  {}", rule.fix.trim());
+    let origin = &config.origins[id];
+    if !origin.dir.is_empty() {
+        println!("From: {} (applies to {}/ only)", origin.file(), origin.dir);
+    }
+    println!();
     println!("Checks:");
     for line in rule.describe_checks() {
         println!("  {line}");
@@ -326,7 +332,7 @@ fn explain(config_path: &Path, id: &str) -> Result<()> {
 }
 
 fn list(config_path: &Path) -> Result<()> {
-    let config = Config::load(config_path)?;
+    let config = source::load_config(config_path)?;
     let width = config.rules.keys().map(String::len).max().unwrap_or(0);
     for (id, rule) in &config.rules {
         let scope_count = config.scopes.iter().filter(|s| s.rules.contains(id)).count();

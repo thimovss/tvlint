@@ -239,3 +239,69 @@ fn json_and_sarif_output_are_documents_on_stdout() {
     let doc: serde_json::Value = serde_json::from_str(&stdout(&clean)).unwrap();
     assert_eq!(doc["violations"].as_array().unwrap().len(), 0);
 }
+
+const NO_PRINT: &str = "rules:
+  no-print:
+    language: python
+    forbid_call: [print]
+    rationale: r
+    fix: f
+scopes:
+  - rules: [no-print]
+    include: [\"**/*.py\"]
+";
+
+#[test]
+fn a_nested_config_applies_to_its_own_directory_with_paths_relative_to_it() {
+    let nested = "rules:
+  no-eval:
+    language: python
+    forbid_call: [eval]
+    rationale: r
+    fix: f
+  codes-registered:
+    language: python
+    literal_argument:
+      calls: [fail]
+      registry: { file: codes.json, path: codes.*, use: value }
+    rationale: r
+    fix: f
+scopes:
+  - rules: [no-eval, codes-registered]
+    include: [\"src/**\"]
+    exclude: [\"src/legacy/**\"]
+";
+    let p = Project::new(
+        "nested",
+        &[
+            ("tvlint.yaml", NO_PRINT),
+            ("svc/tvlint.yaml", nested),
+            ("svc/codes.json", "{\"codes\": [\"ok\"]}"),
+            ("svc/src/a.py", "print(1)\neval(2)\nfail('ok')\nfail('nope')\n"),
+            ("svc/src/legacy/b.py", "eval(3)\n"),
+            ("svc/other/c.py", "eval(4)\n"),
+            ("top/d.py", "eval(5)\nprint(6)\n"),
+        ],
+    );
+    let out = p.tvl(&[]);
+    assert_eq!(exit(&out), 1, "{}{}", stdout(&out), stderr(&out));
+    let found = violations(&out);
+    // The root rule reaches everything; the nested rules only src/ of svc/, minus src/legacy/.
+    assert_eq!(found, ["svc/src/a.py:1:1", "svc/src/a.py:2:1", "svc/src/a.py:4:6", "top/d.py:2:1"], "{}", stdout(&out));
+
+    let listed = stdout(&p.tvl(&["list"]));
+    assert!(listed.contains("no-eval") && listed.contains("no-print"), "{listed}");
+    assert!(stdout(&p.tvl(&["explain", "no-eval"])).contains("From: svc/tvlint.yaml"));
+    let validated = p.tvl(&["validate"]);
+    assert_eq!(exit(&validated), 0, "{}", stdout(&validated));
+    assert!(stdout(&validated).contains("svc/tvlint.yaml: VALID"), "{}", stdout(&validated));
+}
+
+#[test]
+fn rule_ids_must_be_unique_across_configs() {
+    let p = Project::new("nested-dup", &[("tvlint.yaml", NO_PRINT), ("svc/tvlint.yaml", NO_PRINT)]);
+    let out = p.tvl(&[]);
+    assert_eq!(exit(&out), 2);
+    assert!(stderr(&out).contains("`no-print` is defined in tvlint.yaml and in svc/tvlint.yaml"), "{}", stderr(&out));
+    assert_eq!(exit(&p.tvl(&["validate"])), 1);
+}

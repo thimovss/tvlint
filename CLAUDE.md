@@ -26,7 +26,7 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
 **In scope**
 
 - Single binary CLI (`tvl check`, `tvl init`, `tvl explain <rule>`)
-- One YAML rule file, `tvlint.yaml`, at the project root
+- One YAML rule file, `tvlint.yaml`, at the project root; any subdirectory may add its own, which applies to that directory only (paths relative to it)
 - Parsing via tree-sitter; **JavaScript, TypeScript, and Python** first, behind a language-agnostic adapter layer (see Architecture)
 - Four rule types:
   1. **Dependency boundaries:** `src/ui` may not import from `src/db`
