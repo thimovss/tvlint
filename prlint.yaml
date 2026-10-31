@@ -1,0 +1,162 @@
+# prlint lints itself. These are the architecture rules of this repository: what may depend on what,
+# and which crates may be used where. Formatting and general Rust lints belong to rustfmt and clippy.
+#
+#   prlint validate    # is this file correct?
+#   prlint check       # does the code follow it?
+
+rules:
+  # ---- Language-agnostic core -------------------------------------------------------------------
+
+  parsers-only-in-source:
+    language: rust
+    forbid_import: ["tree_sitter_*", "tree_sitter_*::**", "tree_sitter::Parser"]
+    forbid_call: ["tree_sitter_*::*", "Parser::new", "tree_sitter::Parser::new"]
+    rationale: >
+      source.rs (Parsers) is the one place that knows which grammar parses which file. Code that builds its own
+      parser or names a grammar crate bypasses it, and has to be taught about every new language.
+    fix: Add the grammar to Parsers in src/source.rs and call Parsers::parse.
+
+  node-kinds-only-in-adapters:
+    language: rust
+    forbid_call: ["*.kind"]
+    rationale: >
+      Tree-sitter node kinds such as "raise_statement" differ per language. Only the adapters (src/adapter.rs) may
+      match on them. The engine asks the adapter a language-neutral question instead.
+    fix: Add a method to the Adapter trait, implement it for each language, and call that.
+
+  one-parser-technology:
+    language: rust
+    forbid_import:
+      - "rustpython_parser"
+      - "rustpython_parser::**"
+      - "rustpython_ast"
+      - "rustpython_ast::**"
+      - "ruff_python_parser"
+      - "ruff_python_parser::**"
+      - "swc_ecma_parser"
+      - "swc_ecma_parser::**"
+      - "oxc_parser"
+      - "oxc_parser::**"
+      - "syn"
+      - "syn::**"
+    rationale: >
+      Every language is parsed with tree-sitter, so the engine sees one kind of syntax tree and a new language costs
+      one grammar. A second parser technology means a second model of the code to keep in step.
+    fix: Use tree-sitter and write an adapter for the language.
+
+  # ---- Crates -----------------------------------------------------------------------------------
+
+  maintained-yaml-crate:
+    language: rust
+    forbid_import: ["serde_yaml", "serde_yaml::**"]
+    forbid_call: ["serde_yaml::*"]
+    rationale: serde_yaml is archived and unmaintained. serde_yaml_ng is the maintained fork with the same API.
+    fix: Use serde_yaml_ng.
+
+  yaml-only-in-config-and-validate:
+    language: rust
+    forbid_import: ["serde_yaml_ng", "serde_yaml_ng::**"]
+    forbid_call: ["serde_yaml_ng::*"]
+    rationale: >
+      config.rs loads the config with a strict schema, and validate.rs reads the raw YAML to report every problem.
+      Other code reading YAML would skip both.
+    fix: Go through Config, from src/config.rs.
+
+  # ---- Determinism ------------------------------------------------------------------------------
+  # The same input must give the same output, so violations are reported in a stable order.
+
+  deterministic-collections:
+    language: rust
+    forbid_import: ["std::collections::HashMap"]
+    forbid_call: ["*HashMap::*"]
+    rationale: >
+      A HashMap iterates in a different order on every run, which makes output and results unstable. HashSet is
+      fine for membership checks, but anything that is iterated or printed must have an order.
+    fix: Use BTreeMap, or sort before iterating.
+
+  # ---- Module layering --------------------------------------------------------------------------
+  # Each module may only depend on the ones below it, and a module may always import itself (that is
+  # what `use super::*` in its tests resolves to). The dependency order, lowest first:
+  #
+  #   config, select  <  source, scope  <  adapter  <  check  <  suppress  <  validate, main
+  #
+  # adapter and check refer to each other (Project lives in check, and check calls the adapters). That
+  # one import is allowed on purpose (a bare `crate::x` is listed beside `crate::x::**`, since `use crate::x::{self}` is the module itself); anything else going the wrong way is a mistake.
+
+  foundation-modules-import-nothing:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::config::**", "crate::config", "crate::select::**", "crate::select"]
+    rationale: config.rs defines the model every other module is written against, and select.rs is self-contained. Neither may depend on the rest.
+    fix: Move the shared type down into src/config.rs, or pass the value in as an argument.
+
+  io-modules-depend-on-config-only:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::config::**", "crate::config", "crate::source::**", "crate::source", "crate::scope::**", "crate::scope"]
+    rationale: source.rs reads files and scope.rs matches paths. They sit below the adapters and the engine and must not know about them.
+    fix: Pass what is needed in as an argument.
+
+  adapters-depend-on-config-and-project:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::adapter::**", "crate::adapter", "crate::config::**", "crate::config", "crate::check::Project"]
+    rationale: An adapter answers questions about a syntax tree. It must not depend on the engine, the commands or the suppression logic built on top of it.
+    fix: Pass what the adapter needs in as an argument, or move the shared type down.
+
+  engine-depends-on-adapters-and-source:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::check::**", "crate::check", "crate::adapter::**", "crate::adapter", "crate::config::**", "crate::config", "crate::source::**", "crate::source"]
+    rationale: The engine evaluates rules. It must not depend on the commands that call it or on the modules built on top of it (suppress, select, scope, validate).
+    fix: Pass what the engine needs in as an argument.
+
+  suppression-depends-on-engine-and-source:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::suppress::**", "crate::suppress", "crate::check::**", "crate::check", "crate::source::**", "crate::source"]
+    rationale: suppress.rs reads comments from parsed files. It must not depend on the commands.
+    fix: Return what the commands need and let them combine it.
+
+  # ---- Repository layout ------------------------------------------------------------------------
+
+  cookbook-file-names:
+    require_filename: ["[a-z]*.yaml", "README.md"]
+    rationale: Every cookbook recipe is one lowercase-kebab-case .yaml file, named after its rule, next to its language's README.md.
+    fix: Rename the file after the rule it contains, e.g. no-wall-clock-in-tests.yaml.
+
+scopes:
+  - rules: [parsers-only-in-source]
+    include: ["src/**"]
+    exclude: ["src/source.rs"]
+
+  # Excluded: suppress.rs asks only whether a node is a comment, which every grammar names
+  # `comment` or `*_comment`, and validate.rs calls .kind() on glob errors, not syntax nodes.
+  - rules: [node-kinds-only-in-adapters]
+    include: ["src/**"]
+    exclude: ["src/adapter.rs", "src/suppress.rs", "src/validate.rs"]
+
+  - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections]
+    include: ["src/**"]
+
+  - rules: [yaml-only-in-config-and-validate]
+    include: ["src/**"]
+    exclude: ["src/config.rs", "src/validate.rs"]
+
+  - rules: [foundation-modules-import-nothing]
+    include: ["src/config.rs", "src/select.rs"]
+
+  - rules: [io-modules-depend-on-config-only]
+    include: ["src/source.rs", "src/scope.rs"]
+
+  - rules: [adapters-depend-on-config-and-project]
+    include: ["src/adapter.rs"]
+
+  - rules: [engine-depends-on-adapters-and-source]
+    include: ["src/check.rs"]
+
+  - rules: [suppression-depends-on-engine-and-source]
+    include: ["src/suppress.rs"]
+
+  - rules: [cookbook-file-names]
+    include: ["cookbook/**"]
