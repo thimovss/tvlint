@@ -29,6 +29,9 @@ pub struct Parsers {
     typescript: Parser,
     tsx: Parser,
     rust: Parser,
+    json: Parser,
+    yaml: Parser,
+    toml: Parser,
 }
 
 impl Parsers {
@@ -44,6 +47,9 @@ impl Parsers {
             typescript: parser("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())?,
             tsx: parser("tsx", tree_sitter_typescript::LANGUAGE_TSX.into())?,
             rust: parser("rust", tree_sitter_rust::LANGUAGE.into())?,
+            json: parser("json", tree_sitter_json::LANGUAGE.into())?,
+            yaml: parser("yaml", tree_sitter_yaml::LANGUAGE.into())?,
+            toml: parser("toml", tree_sitter_toml_ng::LANGUAGE.into())?,
         })
     }
 
@@ -57,6 +63,9 @@ impl Parsers {
             Language::TypeScript if path.extension().is_some_and(|e| e == "tsx") => &mut self.tsx,
             Language::TypeScript => &mut self.typescript,
             Language::Rust => &mut self.rust,
+            Language::Json => &mut self.json,
+            Language::Yaml => &mut self.yaml,
+            Language::Toml => &mut self.toml,
         };
         parser.parse(text, None).map(|tree| (language, tree))
     }
@@ -103,10 +112,17 @@ pub fn use_index_contents(files: &mut [SourceFile], staged: &BTreeSet<String>, r
     Ok(())
 }
 
+/// Walks the project honouring `.gitignore`. Hidden files count (`.github/workflows` holds rules' targets), `.git` does not.
+fn walker(root: &Path) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(root);
+    builder.hidden(false).filter_entry(|entry| entry.file_name() != ".git");
+    builder
+}
+
 /// Every file under `root` (any type), relative to it, honouring `.gitignore`.
 pub fn list_all(root: &Path) -> Result<Vec<String>> {
     let mut paths = Vec::new();
-    for entry in WalkBuilder::new(root).build() {
+    for entry in walker(root).build() {
         let entry = entry?;
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
@@ -123,7 +139,7 @@ pub fn load_all(root: &Path) -> Result<Vec<SourceFile>> {
     let mut parsers = Parsers::new()?;
 
     let mut files = Vec::new();
-    for entry in WalkBuilder::new(root).build() {
+    for entry in walker(root).build() {
         let entry = entry?;
         let path = entry.path();
         if !entry.file_type().is_some_and(|t| t.is_file()) {

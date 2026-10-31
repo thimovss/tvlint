@@ -1,0 +1,16 @@
+# Internal packages are linked with the workspace protocol
+# A version range for a package that lives in the same repository can silently resolve to a
+# published copy instead of the local one.
+
+rules:
+  workspace-protocol:
+    language: json
+    property_value:
+      names: ["dependencies.@acme/*", "devDependencies.@acme/*"]
+      require_value: ["workspace:*"]
+    rationale: A version number for an internal package can resolve to the published copy, so a change in the repository is not what the app builds against.
+    fix: Depend on it as "workspace:*".
+
+scopes:
+  - rules: [workspace-protocol]
+    include: ["apps/*/package.json", "packages/*/package.json"]

@@ -34,6 +34,7 @@ Every recipe uses `language: [javascript, typescript]`, so it covers `.js`, `.js
 - [Do not toast API failures a second time](no-toast-in-on-error.yaml)
 - [Toast text must come from the translation function](toasts-are-translated.yaml)
 - [Query keys start with the tenant or account id](query-keys-scoped-by-account.yaml)
+- [Every t("key") exists in the English translations](translation-keys-exist.yaml)
 
 ### Tests
 

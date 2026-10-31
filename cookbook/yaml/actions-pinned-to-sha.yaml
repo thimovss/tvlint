@@ -1,0 +1,17 @@
+# GitHub Actions are pinned to a commit
+# A tag such as @v4 can be moved to different code after you reviewed it. A full commit SHA cannot.
+# Local actions (./.github/actions/x) and docker:// references have no commit to pin, so they are
+# allowed by the patterns below.
+
+rules:
+  actions-pinned-to-sha:
+    language: yaml
+    property_value:
+      names: ["jobs.*.steps.*.uses"]
+      require_value: ["./*", "docker://*", "*@[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*"]
+    rationale: A tag or branch can be moved to different code than the one you reviewed, which is how supply-chain attacks on actions have worked.
+    fix: 'Pin the action to the full commit SHA and keep the version in a comment, e.g. `uses: actions/checkout@<sha> # v4.1.1`.'
+
+scopes:
+  - rules: [actions-pinned-to-sha]
+    include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]

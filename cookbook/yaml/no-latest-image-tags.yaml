@@ -1,0 +1,18 @@
+# Container images have a version tag
+# :latest (or no tag at all) pulls whatever was published last, so the same file starts different
+# software on different days.
+
+rules:
+  no-latest-image-tags:
+    language: yaml
+    property_value:
+      names: ["services.*.image"]
+      # Values are globs: no ":" at all means no tag, and ":latest" is as bad.
+      require_value: ["*:*"]
+      forbid_value: ["*:latest"]
+    rationale: An image without a version tag changes under you, and a deploy cannot be reproduced or rolled back.
+    fix: Use an explicit tag, e.g. `postgres:16.3`, or better a digest.
+
+scopes:
+  - rules: [no-latest-image-tags]
+    include: ["docker-compose*.yml", "docker-compose*.yaml", "compose*.yaml"]

@@ -5,8 +5,9 @@ use anyhow::{Context, Result};
 use globset::{Glob, GlobBuilder};
 use serde_yaml_ng::{Mapping, Value};
 
-use crate::check::ClassIndex;
+use crate::check::{ClassIndex, normalize_file};
 use crate::config::{Config, Language};
+use crate::data::{Doc, PathPattern};
 use crate::scope::CompiledScope;
 use crate::source;
 
@@ -16,15 +17,19 @@ const TOP_KEYS: &[(&str, &str)] = &[
     ("aliases", "optional; import prefix to project path, e.g. `\"@/\": \"src/\"`"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
-    ("language", "`python`, `javascript`, `typescript` or `rust`, or a list of them; required with forbid_* checks"),
+    ("language", "`python`, `javascript`, `typescript`, `rust`, `json`, `yaml` or `toml`, or a list of them; required with every check except require_filename. Data languages cannot be mixed with code languages"),
     ("forbid_raise", "Python, JS/TS; list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
     ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`; Rust macros end in `!`"),
     ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
     ("forbid_import", "JS/TS and Rust; module specifiers that must not be imported; relative and aliased imports match by project path"),
     ("except_import", "JS/TS and Rust; imports that are fine although they match forbid_import"),
     ("forbid_element", "JS/TS; JSX element names that must not be used, e.g. `button`"),
-    ("forbid_property", "JS/TS; object-literal property names that must not appear"),
-    ("property_value", "JS/TS; `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`"),
+    ("forbid_property", "JS/TS: object-literal property names that must not appear. JSON/YAML/TOML: key paths that must not exist, e.g. `scripts.postinstall`, `jobs.*.permissions`, `**.debug`"),
+    ("property_value", "JS/TS: `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`. JSON/YAML/TOML: `names` (key paths) plus `forbid_value` and/or `require_value` (globs on the value)"),
+    ("require_property", "JSON/YAML/TOML; key paths that must exist, e.g. `jobs.*.timeout-minutes`: every match of the parent path needs the key"),
+    ("same_keys_as", "JSON/YAML/TOML; path of a reference file whose keys every matched file must have, no more and no fewer"),
+    ("same_placeholders", "JSON/YAML/TOML; true: shared messages must also use the same `{{placeholders}}` as the same_keys_as file"),
+    ("literal_argument", "Python, JS/TS, Rust; `calls`, `position` and a `registry` (file, path, use): string literals passed to those calls must be listed in a data file; `report_unused: true` also reports entries nothing uses"),
     ("within_property", "JS/TS; only count call, raise and element hits inside a property with one of these names"),
     ("require_filename", "list of file name globs; any matched file whose name matches none is a violation"),
     ("rationale", "required; why the rule exists, shown with every violation"),
@@ -35,7 +40,7 @@ const SCOPE_KEYS: &[(&str, &str)] = &[
     ("include", "required; list of path globs relative to the config file's directory"),
     ("exclude", "optional; list of path globs to leave out"),
 ];
-const LANGUAGES: &[&str] = &["python", "javascript", "typescript", "rust"];
+const LANGUAGES: &[&str] = &["python", "javascript", "typescript", "rust", "json", "yaml", "toml"];
 
 struct Diagnostic {
     path: String,
@@ -124,8 +129,41 @@ fn check_against_project(
     let all_paths = source::list_all(&root)?;
     let scopes = config.scopes.iter().map(CompiledScope::new).collect::<Result<Vec<_>>>()?;
 
+    let docs: std::collections::BTreeMap<String, Doc> =
+        files.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), Doc::build(f))).collect();
+
     let mut summaries = Vec::new();
     for (id, rule) in &config.rules {
+        if let Some(reference) = &rule.same_keys_as
+            && !docs.contains_key(&normalize_file(reference))
+        {
+            report.error(
+                &format!("rules.{id}.same_keys_as"),
+                format!("`{reference}` is not a JSON, YAML or TOML file in the project"),
+                Some(format!("the path is relative to {}; files ignored by .gitignore are skipped", root.display())),
+            );
+        }
+        if let Some(arg) = &rule.literal_argument {
+            let at = format!("rules.{id}.literal_argument.registry");
+            match docs.get(&normalize_file(&arg.registry.file)) {
+                None => report.error(
+                    &format!("{at}.file"),
+                    format!("`{}` is not a JSON, YAML or TOML file in the project", arg.registry.file),
+                    Some(format!("the path is relative to {}; files ignored by .gitignore are skipped", root.display())),
+                ),
+                Some(doc) => {
+                    if let Ok(pattern) = PathPattern::parse(&arg.registry.path)
+                        && doc.registry(&pattern, arg.registry.use_).is_empty()
+                    {
+                        report.warning(
+                            &format!("{at}.path"),
+                            format!("`{}` selects no entries in {}, so every literal would be reported", arg.registry.path, arg.registry.file),
+                            Some("`use: value` and `use: path` only count scalars; check the path against the file's structure".into()),
+                        );
+                    }
+                }
+            }
+        }
         let mut matched: BTreeSet<&str> = BTreeSet::new();
         let mut per_scope = Vec::new();
         for (i, scope) in scopes.iter().enumerate().filter(|(_, s)| s.rules.contains(id)) {
@@ -285,6 +323,9 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
         "forbid_element",
         "forbid_property",
         "property_value",
+        "require_property",
+        "same_keys_as",
+        "literal_argument",
     ]
     .iter()
     .any(|k| rule.get(*k).is_some());
@@ -345,6 +386,7 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     }
     validate_language_support(rule, path, &languages, report);
     validate_ecmascript_keys(rule, path, &mut checks, report);
+    validate_data_keys(rule, path, &languages, &mut checks, report);
     if checks == 0 {
         report.error(
             path,
@@ -378,6 +420,7 @@ fn validate_aliases(value: &Value, report: &mut Report) {
 fn validate_language_support(rule: &Mapping, path: &str, languages: &[String], report: &mut Report) {
     const KEYS: &[&str] = &[
         "forbid_raise",
+        "forbid_call",
         "forbid_catch",
         "forbid_import",
         "except_import",
@@ -385,6 +428,9 @@ fn validate_language_support(rule: &Mapping, path: &str, languages: &[String], r
         "forbid_property",
         "property_value",
         "within_property",
+        "require_property",
+        "same_keys_as",
+        "same_placeholders",
     ];
     for key in KEYS.iter().filter(|k| rule.get(**k).is_some()) {
         for language in languages.iter().filter_map(|l| Language::from_name(l)) {
@@ -453,12 +499,148 @@ fn validate_ecmascript_keys(rule: &Mapping, path: &str, checks: &mut usize, repo
     }
 }
 
+/// Key paths of data files: a dotted path with `*` and `**`, checked the way `check` will read it.
+fn path_patterns(value: &Value, path: &str, report: &mut Report) {
+    for (i, pattern) in string_or_list(value, path, report).iter().enumerate() {
+        if let Err(err) = PathPattern::parse(pattern) {
+            report.error(
+                &format!("{path}[{i}]"),
+                format!("invalid key path: {err}"),
+                Some("write keys separated by dots; `*` is any one key or list index, `**` any depth, and a key containing a dot goes in double quotes".into()),
+            );
+        }
+    }
+}
+
+fn validate_data_keys(rule: &Mapping, path: &str, languages: &[String], checks: &mut usize, report: &mut Report) {
+    let data = languages.iter().filter_map(|l| Language::from_name(l)).any(Language::is_data);
+    let code = languages.iter().filter_map(|l| Language::from_name(l)).any(|l| !l.is_data());
+    if data && code {
+        report.error(
+            &format!("{path}.language"),
+            "JSON, YAML and TOML cannot share a rule with code languages",
+            Some("their checks read key paths, not syntax; make one rule for the data files and one for the code".into()),
+        );
+    }
+    if data {
+        if let Some(value) = rule.get("forbid_property") {
+            path_patterns(value, &format!("{path}.forbid_property"), report);
+        }
+        if let Some(Value::Mapping(pv)) = rule.get("property_value")
+            && let Some(names) = pv.get("names")
+        {
+            path_patterns(names, &format!("{path}.property_value.names"), report);
+        }
+    }
+    if let Some(value) = rule.get("require_property") {
+        *checks += 1;
+        let at = format!("{path}.require_property");
+        path_patterns(value, &at, report);
+        for (i, pattern) in string_or_list(value, &at, &mut Report::default()).iter().enumerate() {
+            if PathPattern::parse(pattern).ok().is_some_and(|p| p.split_last().is_none()) {
+                report.error(
+                    &format!("{at}[{i}]"),
+                    format!("`{pattern}` ends in a wildcard, so it names no key that must exist"),
+                    Some("end the path with a key name: `jobs.*.timeout-minutes`".into()),
+                );
+            }
+        }
+    }
+    if let Some(value) = rule.get("same_keys_as") {
+        *checks += 1;
+        if !matches!(value, Value::String(s) if !s.trim().is_empty()) {
+            report.error(&format!("{path}.same_keys_as"), format!("expected a file path, found {}", describe(value)), Some("e.g. `same_keys_as: src/locales/en.json`".into()));
+        }
+    }
+    if let Some(value) = rule.get("same_placeholders") {
+        if !matches!(value, Value::Bool(_)) {
+            report.error(&format!("{path}.same_placeholders"), format!("expected true or false, found {}", describe(value)), None);
+        }
+        if rule.get("same_keys_as").is_none() {
+            report.error(&format!("{path}.same_placeholders"), "same_placeholders needs same_keys_as", Some("add `same_keys_as: <reference file>`".into()));
+        }
+    }
+    if let Some(value) = rule.get("literal_argument") {
+        *checks += 1;
+        validate_literal_argument(value, &format!("{path}.literal_argument"), report);
+    }
+}
+
+fn validate_literal_argument(value: &Value, path: &str, report: &mut Report) {
+    const KEYS: &[(&str, &str)] = &[
+        ("calls", "required; call pattern or list of patterns, like forbid_call"),
+        ("position", "optional; which argument to check, counting from 0 (default 0)"),
+        ("registry", "required; `file`, `path` and optionally `use` (key, value or path) of the data file listing the allowed values"),
+        ("report_unused", "optional; true also reports registry entries that no call uses"),
+    ];
+    let Some(map) = expect_mapping(value, path, "a mapping with `calls` and `registry`", report) else { return };
+    check_keys(map, path, KEYS, report);
+    match map.get("calls") {
+        None => report.error(path, "missing required key `calls`", Some("add `calls: [\"*Exception\"]`".into())),
+        Some(v) => {
+            for (i, pattern) in string_or_list(v, &format!("{path}.calls"), report).iter().enumerate() {
+                if let Err(err) = Glob::new(pattern) {
+                    report.error(&format!("{path}.calls[{i}]"), format!("invalid pattern `{pattern}`: {}", err.kind()), None);
+                }
+            }
+        }
+    }
+    match map.get("position") {
+        None | Some(Value::Number(_)) => {}
+        Some(other) => report.error(&format!("{path}.position"), format!("expected an argument number, found {}", describe(other)), None),
+    }
+    match map.get("report_unused") {
+        None | Some(Value::Bool(_)) => {}
+        Some(other) => report.error(&format!("{path}.report_unused"), format!("expected true or false, found {}", describe(other)), None),
+    }
+    let registry_path = format!("{path}.registry");
+    match map.get("registry") {
+        None => report.error(path, "missing required key `registry`", Some("add `registry: { file: codes.json, path: \"*\", use: key }`".into())),
+        Some(registry) => {
+            let Some(reg) = expect_mapping(registry, &registry_path, "a mapping with `file` and `path`", report) else { return };
+            check_keys(
+                reg,
+                &registry_path,
+                &[
+                    ("file", "required; data file relative to the config"),
+                    ("path", "required; key path selecting the entries, e.g. `codes.*`"),
+                    ("use", "key, value (default) or path: what an entry is called"),
+                ],
+                report,
+            );
+            for key in ["file", "path"] {
+                match reg.get(key) {
+                    Some(Value::String(s)) if !s.trim().is_empty() => {}
+                    None => report.error(&registry_path, format!("missing required key `{key}`"), None),
+                    Some(other) => report.error(&format!("{registry_path}.{key}"), format!("expected text, found {}", describe(other)), None),
+                }
+            }
+            if let Some(Value::String(pattern)) = reg.get("path")
+                && let Err(err) = PathPattern::parse(pattern)
+            {
+                report.error(&format!("{registry_path}.path"), format!("invalid key path: {err}"), None);
+            }
+            match reg.get("use") {
+                None => {}
+                Some(Value::String(s)) if ["key", "value", "path"].contains(&s.as_str()) => {}
+                Some(other) => report.error(
+                    &format!("{registry_path}.use"),
+                    format!("expected key, value or path, found {}", other.as_str().map_or_else(|| describe(other).to_string(), |s| format!("`{s}`"))),
+                    None,
+                ),
+            }
+        }
+    }
+}
+
 fn validate_property_value(value: &Value, path: &str, report: &mut Report) {
     const KEYS: &[(&str, &str)] = &[
         ("names", "required; property name or list of names to look at"),
         ("in_call", "optional; only objects passed directly to one of these calls, e.g. `toast.add`"),
         ("forbid_literal", "true: the value must not be a string literal"),
         ("array_starts_with", "an array-literal value must start with this element, e.g. `accountID`"),
+        ("forbid_value", "JSON/YAML/TOML; glob or list of globs the value must not match, e.g. `[\"^*\", latest]`"),
+        ("require_value", "JSON/YAML/TOML; glob or list of globs, one of which the value must match"),
     ];
     let Some(map) = expect_mapping(value, path, "a mapping with `names` and a constraint", report) else { return };
     check_keys(map, path, KEYS, report);
@@ -487,8 +669,22 @@ fn validate_property_value(value: &Value, path: &str, report: &mut Report) {
             false
         }
     };
-    if !literal && !starts && !report.errors.iter().any(|d| d.path.starts_with(path)) {
-        report.error(path, "the property_value has no constraint", Some("add `forbid_literal: true` or `array_starts_with: <element>`".into()));
+    for key in ["forbid_value", "require_value"] {
+        if let Some(v) = map.get(key) {
+            for (i, pattern) in string_or_list(v, &format!("{path}.{key}"), report).iter().enumerate() {
+                if let Err(err) = Glob::new(pattern) {
+                    report.error(&format!("{path}.{key}[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+                }
+            }
+        }
+    }
+    let values = map.get("forbid_value").is_some() || map.get("require_value").is_some();
+    if !literal && !starts && !values && !report.errors.iter().any(|d| d.path.starts_with(path)) {
+        report.error(
+            path,
+            "the property_value has no constraint",
+            Some("add `forbid_literal: true` or `array_starts_with: <element>` (JS/TS), or `forbid_value` / `require_value` (JSON/YAML/TOML)".into()),
+        );
     }
 }
 
@@ -700,6 +896,47 @@ scopes:
         errors.iter().any(|(p, m)| p == path && m.contains(fragment))
     }
 
+    fn rule_errors(body: &str) -> Vec<(String, String)> {
+        errors(&format!("rules:\n  r:\n{body}    rationale: why\n    fix: how\nscopes:\n  - rules: [r]\n    include: [\"**\"]\n"))
+    }
+
+    #[test]
+    fn accepts_data_rules() {
+        assert!(rule_errors("    language: yaml\n    require_property: [jobs.*.timeout-minutes]\n").is_empty());
+        assert!(rule_errors("    language: json\n    same_keys_as: en.json\n    same_placeholders: true\n").is_empty());
+        assert!(rule_errors("    language: toml\n    property_value: { names: [\"dependencies.*\"], forbid_value: [\"[*]\"] }\n").is_empty());
+        let literal = "    language: python\n    literal_argument:\n      calls: [\"*Exception\"]\n      registry: { file: codes.json, path: \"codes.*\", use: key }\n      report_unused: true\n";
+        assert!(rule_errors(literal).is_empty());
+    }
+
+    #[test]
+    fn reports_data_rule_mistakes() {
+        let found = rule_errors("    language: [json, python]\n    forbid_property: [\"a..b\"]\n");
+        assert!(has(&found, "rules.r.language", "cannot share a rule"), "{found:?}");
+        assert!(has(&found, "rules.r.forbid_property[0]", "empty segment"), "{found:?}");
+        let found = rule_errors("    language: yaml\n    require_property: [\"jobs.*\"]\n    same_placeholders: true\n    forbid_call: [x]\n");
+        assert!(has(&found, "rules.r.require_property[0]", "ends in a wildcard"), "{found:?}");
+        assert!(has(&found, "rules.r.same_placeholders", "needs same_keys_as"), "{found:?}");
+        assert!(has(&found, "rules.r.forbid_call", "not supported for yaml"), "{found:?}");
+        let found = rule_errors("    language: python\n    literal_argument: { calls: [E], registry: { file: c.json, path: \"*\", use: keys } }\n");
+        assert!(has(&found, "rules.r.literal_argument.registry.use", "expected key, value or path"), "{found:?}");
+        let found = rule_errors("    language: python\n    require_property: [a.b]\n");
+        assert!(has(&found, "rules.r.require_property", "not supported for python"), "{found:?}");
+    }
+
+    #[test]
+    fn typed_loader_checks_data_property_values() {
+        let load = |body: &str| {
+            Config::parse(&format!("rules:\n  r:\n{body}    rationale: why\n    fix: how\nscopes:\n  - rules: [r]\n    include: [\"**\"]\n"))
+                .err()
+                .map(|e| format!("{e:#}"))
+        };
+        assert!(load("    language: json\n    property_value: { names: [a], forbid_literal: true }\n").unwrap().contains("not forbid_literal"));
+        assert!(load("    language: json\n    property_value: { names: [a] }\n").unwrap().contains("needs forbid_value or require_value"));
+        assert!(load("    language: typescript\n    property_value: { names: [a], forbid_value: [x] }\n").unwrap().contains("read JSON, YAML and TOML"));
+        assert!(load("    language: json\n    property_value: { names: [a], require_value: [x] }\n").is_none());
+    }
+
     #[test]
     fn accepts_a_good_config() {
         assert!(errors(GOOD).is_empty());
@@ -861,6 +1098,32 @@ scopes:
         let mixed = errors(&ES_RULE.replace("language: typescript", "language: [typescript, rust]").replace("    fix: how\n", "    fix: how\n    forbid_raise: [E]\n"));
         assert!(has(&mixed, "rules.r.forbid_raise", "not supported for rust"), "{mixed:?}");
         assert!(!has(&mixed, "rules.r.forbid_raise", "not supported for typescript"), "{mixed:?}");
+    }
+
+    fn schema_keys(node: &Value) -> BTreeSet<String> {
+        node.get("properties").and_then(Value::as_mapping).unwrap().keys().map(|k| k.as_str().unwrap().to_string()).collect()
+    }
+
+    fn known(keys: &[(&str, &str)]) -> BTreeSet<String> {
+        keys.iter().map(|(k, _)| k.to_string()).collect()
+    }
+
+    #[test]
+    fn json_schema_lists_the_same_keys_as_validate() {
+        let schema: Value = serde_yaml_ng::from_str(crate::SCHEMA).unwrap();
+        let defs = schema.get("$defs").unwrap();
+        assert_eq!(schema_keys(&schema), known(TOP_KEYS));
+        assert_eq!(schema_keys(defs.get("rule").unwrap()), known(RULE_KEYS));
+        assert_eq!(schema_keys(defs.get("scope").unwrap()), known(SCOPE_KEYS));
+        let languages: BTreeSet<String> = defs
+            .get("language")
+            .and_then(|l| l.get("enum"))
+            .and_then(Value::as_sequence)
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(languages, LANGUAGES.iter().map(|l| l.to_string()).collect());
     }
 
     #[test]

@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use tree_sitter::Node;
 
 use crate::adapter::{self, Adapter, last_segment};
-use crate::config::Rule;
+use crate::config::{Rule, Use};
+use crate::data::{self, Doc, PathPattern, Position};
 use crate::source::SourceFile;
 
 /// What a check needs to know about the rest of the project.
@@ -15,6 +17,8 @@ pub struct Project<'a> {
     pub aliases: &'a BTreeMap<String, String>,
     /// Every file in the project, to find which file an import points at.
     pub paths: &'a HashSet<String>,
+    /// Every JSON, YAML and TOML file, parsed.
+    pub docs: &'a BTreeMap<String, Doc>,
 }
 
 pub struct Violation {
@@ -39,6 +43,48 @@ pub struct CompiledRule<'a> {
     property: HashSet<&'a str>,
     within: HashSet<&'a str>,
     property_value: Option<CompiledPropertyValue<'a>>,
+    // Data files (JSON, YAML, TOML).
+    data_property: Vec<PathPattern>,
+    data_value: Option<CompiledDataValue>,
+    require_property: Vec<RequiredProperty>,
+    reference: Option<String>,
+    pub literal: Option<CompiledLiteral>,
+}
+
+struct CompiledDataValue {
+    names: Vec<PathPattern>,
+    forbid: GlobSet,
+    require: GlobSet,
+}
+
+struct RequiredProperty {
+    parent: PathPattern,
+    key: String,
+    text: String,
+}
+
+pub struct CompiledLiteral {
+    calls: GlobSet,
+    position: usize,
+    pub file: String,
+    registry_path: PathPattern,
+    use_: Use,
+    pub report_unused: bool,
+    entries: OnceLock<BTreeMap<String, Position>>,
+}
+
+impl CompiledLiteral {
+    /// The allowed values, by where they are defined in the registry file.
+    pub fn entries(&self, ctx: &Project) -> &BTreeMap<String, Position> {
+        self.entries.get_or_init(|| ctx.docs.get(&self.file).map(|doc| doc.registry(&self.registry_path, self.use_)).unwrap_or_default())
+    }
+}
+
+/// A string literal passed as an argument that a `literal_argument` rule watches.
+pub struct Literal {
+    pub value: String,
+    pub at: Position,
+    pub callee: String,
 }
 
 struct CompiledPropertyValue<'a> {
@@ -48,9 +94,67 @@ struct CompiledPropertyValue<'a> {
     starts_with: Option<GlobMatcher>,
 }
 
+/// `./a/b.json` and `a/b.json` name the same file.
+pub fn normalize_file(path: &str) -> String {
+    path.trim_start_matches("./").to_string()
+}
+
+fn compile_value_globs(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
+    }
+    Ok(builder.build()?)
+}
+
 impl<'a> CompiledRule<'a> {
     pub fn new(id: &'a str, rule: &'a Rule) -> Result<Self> {
+        let data = rule.language.iter().any(|l| l.is_data());
+        let paths = |patterns: &[String], key: &str| -> Result<Vec<PathPattern>> {
+            patterns
+                .iter()
+                .map(|p| PathPattern::parse(p))
+                .collect::<Result<_>>()
+                .with_context(|| format!("rule `{id}` {key}"))
+        };
         Ok(CompiledRule {
+            data_property: if data { paths(&rule.forbid_property, "forbid_property")? } else { Vec::new() },
+            data_value: match (&rule.property_value, data) {
+                (Some(pv), true) => Some(CompiledDataValue {
+                    names: paths(&pv.names, "property_value names")?,
+                    forbid: compile_value_globs(&pv.forbid_value).with_context(|| format!("rule `{id}` forbid_value"))?,
+                    require: compile_value_globs(&pv.require_value).with_context(|| format!("rule `{id}` require_value"))?,
+                }),
+                _ => None,
+            },
+            require_property: rule
+                .require_property
+                .iter()
+                .map(|text| {
+                    let pattern = PathPattern::parse(text).with_context(|| format!("rule `{id}` require_property"))?;
+                    let (parent, key) = pattern.split_last().with_context(|| {
+                        format!("rule `{id}` require_property `{text}`: the last segment must be a key name, not a wildcard")
+                    })?;
+                    Ok(RequiredProperty { parent, key, text: text.clone() })
+                })
+                .collect::<Result<_>>()?,
+            reference: rule.same_keys_as.as_deref().map(normalize_file),
+            literal: rule
+                .literal_argument
+                .as_ref()
+                .map(|arg| -> Result<CompiledLiteral> {
+                    Ok(CompiledLiteral {
+                        calls: compile(&arg.calls)?,
+                        position: arg.position,
+                        file: normalize_file(&arg.registry.file),
+                        registry_path: PathPattern::parse(&arg.registry.path)?,
+                        use_: arg.registry.use_,
+                        report_unused: arg.report_unused,
+                        entries: OnceLock::new(),
+                    })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` literal_argument"))?,
             id,
             rule,
             raise: compile(&rule.forbid_raise).with_context(|| format!("rule `{id}` forbid_raise"))?,
@@ -183,6 +287,10 @@ pub fn check_file(
     ctx: &Project,
     out: &mut Vec<Violation>,
 ) {
+    if file.language.is_data() {
+        check_data(file, rule, ctx, out);
+        return;
+    }
     let adapter = adapter::for_language(file.language);
     let catch_classes = rule.catch_root.map(|root| (root, ctx.index.subclasses_of(root)));
     let src = file.text.as_str();
@@ -271,6 +379,155 @@ pub fn check_file(
             }
         }
     });
+
+    if let Some(literal) = &rule.literal {
+        let entries = literal.entries(ctx);
+        for found in literal_arguments(file, literal) {
+            if !entries.contains_key(&found.value) {
+                out.push(Violation {
+                    path: file.path.clone(),
+                    line: found.at.0,
+                    column: found.at.1,
+                    rule_id: rule.id.to_string(),
+                    message: format!("`{}` passed to `{}` is not listed in {}", found.value, found.callee, literal.file),
+                });
+            }
+        }
+    }
+}
+
+/// The string literals passed as the watched argument of the watched calls.
+pub fn literal_arguments(file: &SourceFile, literal: &CompiledLiteral) -> Vec<Literal> {
+    let adapter = adapter::for_language(file.language);
+    let src = file.text.as_str();
+    let mut found = Vec::new();
+    visit(file.tree.root_node(), &mut |node| {
+        let Some(callee) = adapter.call_name(node, src) else { return };
+        if !literal.calls.is_match(&callee) {
+            return;
+        }
+        let Some(argument) = adapter.call_arguments(node).and_then(|args| args.get(literal.position).copied()) else { return };
+        let Some(value) = adapter.string_value(argument, src) else { return };
+        let at = argument.start_position();
+        found.push(Literal { value, at: (at.row + 1, at.column + 1), callee });
+    });
+    found
+}
+
+/// Registry entries that none of `files` passes to a watched call.
+pub fn unused_registry_entries<'f>(
+    rule: &CompiledRule,
+    files: impl Iterator<Item = &'f SourceFile>,
+    ctx: &Project,
+) -> Vec<Violation> {
+    let Some(literal) = rule.literal.as_ref().filter(|l| l.report_unused) else { return Vec::new() };
+    let used: HashSet<String> = files.flat_map(|f| literal_arguments(f, literal)).map(|l| l.value).collect();
+    literal
+        .entries(ctx)
+        .iter()
+        .filter(|(name, _)| !used.contains(*name))
+        .map(|(name, at)| Violation {
+            path: literal.file.clone(),
+            line: at.0,
+            column: at.1,
+            rule_id: rule.id.to_string(),
+            message: format!("`{name}` is listed here but no watched call passes it"),
+        })
+        .collect()
+}
+
+fn dotted(path: &[String]) -> String {
+    path.join(".")
+}
+
+fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut Vec<Violation>) {
+    let Some(doc) = ctx.docs.get(&file.path) else { return };
+    let mut report = |at: Position, message: String| {
+        out.push(Violation { path: file.path.clone(), line: at.0, column: at.1, rule_id: rule.id.to_string(), message });
+    };
+
+    let mut seen_parent = vec![false; rule.require_property.len()];
+    doc.walk(&mut |path, at, node| {
+        for (required, seen) in rule.require_property.iter().zip(seen_parent.iter_mut()) {
+            if !required.parent.matches(path) {
+                continue;
+            }
+            *seen = true;
+            if let Some(entries) = node.map()
+                && !entries.iter().any(|e| e.key == required.key)
+            {
+                let place = if path.is_empty() { "the file".to_string() } else { format!("`{}`", dotted(path)) };
+                report(at, format!("{place} is missing the required `{}` property", required.key));
+            }
+        }
+        if path.is_empty() {
+            return;
+        }
+        if rule.data_property.iter().any(|p| p.matches(path)) {
+            report(at, format!("the `{}` property is forbidden", dotted(path)));
+        }
+        let Some(values) = &rule.data_value else { return };
+        if !values.names.iter().any(|p| p.matches(path)) {
+            return;
+        }
+        let Some(scalar) = node.scalar() else { return };
+        let (pv_forbid, pv_require) = (rule.rule.property_value.as_ref().map(|p| &p.forbid_value), rule.rule.property_value.as_ref().map(|p| &p.require_value));
+        if values.forbid.is_match(&scalar.text) {
+            let matching = values.forbid.matches(&scalar.text).first().and_then(|i| pv_forbid.and_then(|f| f.get(*i)));
+            report(
+                at,
+                format!(
+                    "`{}` is `{}`, which is forbidden{}",
+                    dotted(path),
+                    scalar.text,
+                    matching.map_or(String::new(), |m| format!(" (matches `{m}`)"))
+                ),
+            );
+        }
+        if !values.require.is_empty() && !values.require.is_match(&scalar.text) {
+            report(
+                at,
+                format!(
+                    "`{}` is `{}`; it must match {}",
+                    dotted(path),
+                    scalar.text,
+                    pv_require.map_or(String::new(), |r| r.iter().map(|g| format!("`{g}`")).collect::<Vec<_>>().join(" or "))
+                ),
+            );
+        }
+    });
+    // A required key under a parent path that does not exist at all. Wildcard parents may match nothing.
+    for (required, seen) in rule.require_property.iter().zip(seen_parent) {
+        if !seen && required.parent.is_literal() {
+            report((1, 1), format!("the required property `{}` is missing", required.text));
+        }
+    }
+
+    if let Some(reference) = &rule.reference
+        && *reference != file.path
+        && let Some(expected) = ctx.docs.get(reference)
+    {
+        let want = expected.leaves();
+        let have = doc.leaves();
+        for key in want.keys().filter(|k| !have.contains_key(*k)) {
+            report(doc.deepest_existing(key), format!("`{key}` is missing; {reference} has it"));
+        }
+        for (key, (at, _)) in have.iter().filter(|(k, _)| !want.contains_key(*k)) {
+            report(*at, format!("`{key}` is not in {reference}"));
+        }
+        if rule.rule.same_placeholders {
+            for (key, (at, text)) in &have {
+                let (Some(text), Some((_, Some(expected_text)))) = (text, want.get(key)) else { continue };
+                let (found, wanted) = (data::placeholders(text), data::placeholders(expected_text));
+                if found != wanted {
+                    let show = |set: &BTreeSet<String>| {
+                        if set.is_empty() { "none".to_string() } else { set.iter().map(|p| format!("{{{p}}}")).collect::<Vec<_>>().join(", ") }
+                    };
+                    report(*at, format!("`{key}` has placeholders {}, but {reference} has {}", show(&found), show(&wanted)));
+                }
+            }
+        }
+    }
 }
 
 /// Depth-first walk over `node` and all its descendants.
@@ -296,6 +553,7 @@ pub fn visit(node: Node, f: &mut impl FnMut(Node)) {
 mod tests {
     use super::*;
     use crate::config::{ClassSelector, Language};
+    use crate::data::Doc;
     use crate::source::Parsers;
 
     fn parse(path: &str, text: &str) -> SourceFile {
@@ -325,6 +583,10 @@ mod tests {
             forbid_property: Vec::new(),
             property_value: None,
             within_property: Vec::new(),
+            require_property: Vec::new(),
+            same_keys_as: None,
+            same_placeholders: false,
+            literal_argument: None,
             require_filename: Vec::new(),
             rationale: String::new(),
             fix: String::new(),
@@ -350,10 +612,185 @@ mod tests {
         let file = parse(path, source);
         let index = ClassIndex::build(std::slice::from_ref(&file));
         let compiled = CompiledRule::new("r", rule).unwrap();
-        let ctx = Project { index: &index, aliases, paths };
+        let docs = BTreeMap::new();
+        let ctx = Project { index: &index, aliases, paths, docs: &docs };
         let mut out = Vec::new();
         check_file(&file, &compiled, &ctx, &mut out);
         out.into_iter().map(|v| (v.line, v.message)).collect()
+    }
+
+    /// Checks `target` among `files` (path, text), all visible to the rule as a project.
+    fn project_hits(files: &[(&str, &str)], target: &str, rule: &Rule) -> Vec<(usize, usize, String)> {
+        let parsed: Vec<SourceFile> = files.iter().map(|(p, t)| parse(p, t)).collect();
+        let index = ClassIndex::build(&parsed);
+        let docs: BTreeMap<String, Doc> = parsed.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), Doc::build(f))).collect();
+        let compiled = CompiledRule::new("r", rule).unwrap();
+        let (aliases, paths) = (BTreeMap::new(), HashSet::new());
+        let ctx = Project { index: &index, aliases: &aliases, paths: &paths, docs: &docs };
+        let mut out = Vec::new();
+        check_file(parsed.iter().find(|f| f.path == target).unwrap(), &compiled, &ctx, &mut out);
+        out.into_iter().map(|v| (v.line, v.column, v.message)).collect()
+    }
+
+    fn data_rule(language: Language) -> Rule {
+        Rule { language: vec![language], ..empty_rule() }
+    }
+
+    fn property_value(names: &[&str], forbid: &[&str], require: &[&str]) -> Option<crate::config::PropertyValue> {
+        let list = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
+        Some(crate::config::PropertyValue {
+            names: list(names),
+            in_call: Vec::new(),
+            forbid_literal: false,
+            array_starts_with: None,
+            forbid_value: list(forbid),
+            require_value: list(require),
+        })
+    }
+
+    // ---- JSON, YAML, TOML
+
+    #[test]
+    fn forbid_property_reports_the_key_at_its_path() {
+        let json = "{\n  \"scripts\": {\n    \"postinstall\": \"x\",\n    \"build\": \"y\"\n  },\n  \"postinstall\": 1\n}\n";
+        let r = Rule { forbid_property: vec!["scripts.postinstall".into()], ..data_rule(Language::Json) };
+        let found = project_hits(&[("package.json", json)], "package.json", &r);
+        assert_eq!(found, [(3, 5, "the `scripts.postinstall` property is forbidden".to_string())]);
+        let yaml = "jobs:\n  a:\n    permissions: write-all\n  b:\n    runs-on: x\n";
+        let r = Rule { forbid_property: vec!["jobs.*.permissions".into()], ..data_rule(Language::Yaml) };
+        assert_eq!(project_hits(&[("w.yml", yaml)], "w.yml", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [3]);
+        let toml = "[dependencies]\nserde = \"1\"\n[dev-dependencies]\nserde = \"1\"\n";
+        let r = Rule { forbid_property: vec!["dev-dependencies".into()], ..data_rule(Language::Toml) };
+        assert_eq!(project_hits(&[("Cargo.toml", toml)], "Cargo.toml", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [3]);
+    }
+
+    #[test]
+    fn forbid_value_and_require_value_read_scalars_by_path() {
+        let json = "{\"dependencies\": {\"a\": \"^1.0.0\", \"b\": \"1.2.3\", \"c\": \"latest\"}, \"strict\": false}";
+        let r = Rule { property_value: property_value(&["dependencies.*"], &["^*", "~*", "latest"], &[]), ..data_rule(Language::Json) };
+        let found = project_hits(&[("p.json", json)], "p.json", &r);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].2.contains("`dependencies.a` is `^1.0.0`") && found[0].2.contains("`^*`"), "{found:?}");
+        let r = Rule { property_value: property_value(&["strict"], &[], &["true"]), ..data_rule(Language::Json) };
+        let found = project_hits(&[("p.json", json)], "p.json", &r);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].2.contains("`strict` is `false`; it must match `true`"), "{found:?}");
+    }
+
+    #[test]
+    fn yaml_values_ignore_quotes_and_walk_lists() {
+        let yaml = "services:\n  web:\n    image: \"app:latest\"\n  db:\n    image: pg:16\nsteps:\n  - uses: a/b@main\n  - uses: c/d@0123abc\n";
+        let r = Rule { property_value: property_value(&["services.*.image"], &["*:latest"], &[]), ..data_rule(Language::Yaml) };
+        assert_eq!(project_hits(&[("c.yaml", yaml)], "c.yaml", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [3]);
+        let r = Rule { property_value: property_value(&["steps.*.uses"], &[], &["*@[0-9a-f][0-9a-f][0-9a-f]*"]), ..data_rule(Language::Yaml) };
+        assert_eq!(project_hits(&[("c.yaml", yaml)], "c.yaml", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [7]);
+    }
+
+    #[test]
+    fn require_property_checks_every_match_of_the_parent() {
+        let yaml = "jobs:\n  build:\n    timeout-minutes: 5\n  test:\n    runs-on: x\n";
+        let r = Rule { require_property: vec!["jobs.*.timeout-minutes".into()], ..data_rule(Language::Yaml) };
+        let found = project_hits(&[("w.yml", yaml)], "w.yml", &r);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].0, found[0].2.as_str()), (4, "`jobs.test` is missing the required `timeout-minutes` property"));
+        // A literal parent that is absent is reported once; a wildcard parent with no match is fine.
+        let r = Rule { require_property: vec!["permissions.contents".into(), "services.*.image".into()], ..data_rule(Language::Yaml) };
+        let found = project_hits(&[("w.yml", yaml)], "w.yml", &r);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].2.contains("`permissions.contents` is missing"), "{found:?}");
+        // The root counts as a parent, and every YAML document is checked.
+        let r = Rule { require_property: vec!["name".into()], ..data_rule(Language::Yaml) };
+        let found = project_hits(&[("k.yaml", "name: a\n---\nkind: b\n")], "k.yaml", &r);
+        assert_eq!(found.iter().map(|h| h.0).collect::<Vec<_>>(), [3]);
+        let r = Rule { require_property: vec!["package.license".into()], ..data_rule(Language::Toml) };
+        assert!(project_hits(&[("Cargo.toml", "[package]\nname = \"x\"\nlicense = \"MIT\"\n")], "Cargo.toml", &r).is_empty());
+    }
+
+    fn locales(rule_placeholders: bool) -> Vec<(usize, usize, String)> {
+        let en = "{\"title\": \"Hi {{name}}\", \"menu\": {\"home\": \"Home\", \"about\": \"About\"}}";
+        let nl = "{\n  \"title\": \"Hallo\",\n  \"menu\": {\n    \"home\": \"Thuis\",\n    \"extra\": \"x\"\n  }\n}\n";
+        let r = Rule { same_keys_as: Some("en.json".into()), same_placeholders: rule_placeholders, ..data_rule(Language::Json) };
+        project_hits(&[("en.json", en), ("nl.json", nl)], "nl.json", &r)
+    }
+
+    #[test]
+    fn same_keys_as_reports_missing_and_extra_keys() {
+        let found = locales(false);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().any(|h| h.2 == "`menu.about` is missing; en.json has it" && h.0 == 3));
+        assert!(found.iter().any(|h| h.2 == "`menu.extra` is not in en.json" && h.0 == 5));
+    }
+
+    #[test]
+    fn same_placeholders_compares_shared_messages() {
+        let found = locales(true);
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(found.iter().any(|h| h.0 == 2 && h.2.contains("has placeholders none, but en.json has {name}")));
+    }
+
+    #[test]
+    fn the_reference_file_is_not_compared_with_itself() {
+        let r = Rule { same_keys_as: Some("./en.json".into()), ..data_rule(Language::Json) };
+        assert!(project_hits(&[("en.json", "{\"a\": 1}")], "en.json", &r).is_empty());
+    }
+
+    // ---- Literal arguments against a registry
+
+    fn literal_rule_for(language: Language, calls: &[&str], position: usize, use_: Use, path: &str) -> Rule {
+        Rule {
+            language: vec![language],
+            literal_argument: Some(crate::config::LiteralArgument {
+                calls: calls.iter().map(|s| s.to_string()).collect(),
+                position,
+                registry: crate::config::Registry { file: "codes.json".into(), path: path.into(), use_ },
+                report_unused: true,
+            }),
+            ..empty_rule()
+        }
+    }
+
+    #[test]
+    fn literal_arguments_must_be_in_the_registry() {
+        let codes = ("codes.json", "{\"codes\": [\"a_failed.x\", \"b_failed.y\"]}");
+        let py = "raise Err('a_failed.x', {})\nraise Err('zzz', {})\nraise Err(code)\nraise Err(f'a{x}')\nraise Err(message='q')\nraise Other('nope')\n";
+        let r = literal_rule_for(Language::Python, &["Err"], 0, Use::Value, "codes.*");
+        let found = project_hits(&[codes, ("a.py", py)], "a.py", &r);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].0, found[0].2.as_str()), (2, "`zzz` passed to `Err` is not listed in codes.json"));
+        let ts = "new Err('a_failed.x');\nthrow new Err(`b_failed.y`);\nnew Err('nope');\nnew Err(...rest, 'nope');\n";
+        let r = literal_rule_for(Language::TypeScript, &["Err"], 0, Use::Value, "codes.*");
+        assert_eq!(project_hits(&[codes, ("a.ts", ts)], "a.ts", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [3]);
+        let rs = "fn f() { err(\"a_failed.x\", 1); err(\"bad\", 2); err(name, 3); }\n";
+        let r = literal_rule_for(Language::Rust, &["err"], 0, Use::Value, "codes.*");
+        assert_eq!(project_hits(&[codes, ("a.rs", rs)], "a.rs", &r).len(), 1);
+    }
+
+    #[test]
+    fn a_later_argument_and_registry_keys() {
+        let codes = ("codes.json", "{\"codes\": {\"home\": \"Home\", \"nav\": {\"about\": \"About\"}}}");
+        let ts = "t('x', 'home');\nt('x', 'nope');\n";
+        let r = literal_rule_for(Language::TypeScript, &["t"], 1, Use::Key, "codes.*");
+        assert_eq!(project_hits(&[codes, ("a.ts", ts)], "a.ts", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [2]);
+        let ts = "t('nav.about');\nt('nav');\nt('home');\n";
+        let r = literal_rule_for(Language::TypeScript, &["t"], 0, Use::Path, "codes.**");
+        assert_eq!(project_hits(&[codes, ("a.ts", ts)], "a.ts", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [1, 2, 3]);
+        let r = literal_rule_for(Language::TypeScript, &["t"], 0, Use::Path, "**");
+        assert_eq!(project_hits(&[codes, ("a.ts", ts)], "a.ts", &r).iter().map(|h| h.0).collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn unused_registry_entries_are_found_across_files() {
+        let json = "{\n  \"codes\": [\n    \"a\",\n    \"b\",\n    \"c\"\n  ]\n}\n";
+        let files = [parse("codes.json", json), parse("x.py", "Err('a')\n"), parse("y.py", "Err('c')\nErr('c')\n")];
+        let docs: BTreeMap<String, Doc> = [("codes.json".to_string(), Doc::build(&files[0]))].into();
+        let r = literal_rule_for(Language::Python, &["Err"], 0, Use::Value, "codes.*");
+        let compiled = CompiledRule::new("r", &r).unwrap();
+        let index = ClassIndex::default();
+        let (aliases, paths) = (BTreeMap::new(), HashSet::new());
+        let ctx = Project { index: &index, aliases: &aliases, paths: &paths, docs: &docs };
+        let unused = unused_registry_entries(&compiled, files[1..].iter(), &ctx);
+        assert_eq!(unused.len(), 1);
+        assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call passes it"));
     }
 
     // ---- Python
@@ -538,6 +975,8 @@ const p = <img onError={x} />;\nconst { onError: renamed } = o;\n";
                 in_call: vec!["toast.add".into()],
                 forbid_literal: true,
                 array_starts_with: None,
+                forbid_value: Vec::new(),
+                require_value: Vec::new(),
             }),
             ..ts_rule()
         }
@@ -561,6 +1000,8 @@ useQuery({ queryKey: [...base, accountID] });\n";
                 in_call: Vec::new(),
                 forbid_literal: false,
                 array_starts_with: Some("accountID".into()),
+                forbid_value: Vec::new(),
+                require_value: Vec::new(),
             }),
             ..ts_rule()
         };

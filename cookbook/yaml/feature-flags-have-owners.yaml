@@ -1,0 +1,17 @@
+# Every feature flag has an owner and a description
+# A flag nobody owns is never removed. The file is assumed to be shaped like
+#   flags:
+#     new-checkout:
+#       owner: team-payments
+#       description: ...
+
+rules:
+  feature-flags-have-owners:
+    language: yaml
+    require_property: ["flags.*.owner", "flags.*.description"]
+    rationale: A flag with no owner is never cleaned up, and nobody can tell whether it is safe to remove.
+    fix: Add `owner` (a team) and `description` to the flag.
+
+scopes:
+  - rules: [feature-flags-have-owners]
+    include: ["config/flags.yaml"]

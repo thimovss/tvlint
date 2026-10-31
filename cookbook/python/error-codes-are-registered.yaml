@@ -1,0 +1,25 @@
+# Every error code raised is listed in error_codes.json
+# The frontend translates errors by code. A code that is raised but not listed shows up untranslated;
+# a code that is listed but never raised is dead weight. report_unused finds those too.
+#
+# Assumes error_codes.json looks like {"codes": ["contract_failed.minimum_one_tenant", ...]}.
+# For an object keyed by code use `path: codes.*` with `use: key`.
+
+rules:
+  error-codes-are-registered:
+    language: python
+    literal_argument:
+      calls: ["*Exception"]
+      position: 0
+      registry:
+        file: backend/error_codes.json
+        path: "codes.*"
+        use: value
+      report_unused: true
+    rationale: The frontend translates API errors by code, so a code missing from error_codes.json reaches users as a raw string.
+    fix: Add the code to backend/error_codes.json (and translate it), or fix the typo. Remove codes nothing raises any more.
+
+scopes:
+  - rules: [error-codes-are-registered]
+    include: ["backend/src/**"]
+    exclude: ["backend/src/tests/**"]

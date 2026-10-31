@@ -1,0 +1,17 @@
+# TypeScript runs in strict mode
+# Turning strict off in one package is how unchecked code gets in. Each tsconfig has to say
+# strict: true itself (or extend a base that does, and be excluded below).
+
+rules:
+  tsconfig-is-strict:
+    language: json
+    require_property: [compilerOptions.strict]
+    property_value:
+      names: [compilerOptions.strict]
+      require_value: ["true"]
+    rationale: Without strict mode null and implicit any slip through, and the package becomes a hole in the type checking of everything that imports it.
+    fix: 'Set "strict": true under compilerOptions, and fix the errors it reveals.'
+
+scopes:
+  - rules: [tsconfig-is-strict]
+    include: ["tsconfig.json", "apps/*/tsconfig.json", "packages/*/tsconfig.json"]

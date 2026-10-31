@@ -78,7 +78,7 @@ rules:
   # Each module may only depend on the ones below it, and a module may always import itself (that is
   # what `use super::*` in its tests resolves to). The dependency order, lowest first:
   #
-  #   config, select  <  source, scope  <  adapter  <  check  <  suppress  <  validate, main
+  #   config, select  <  source, scope  <  data  <  adapter  <  check  <  suppress  <  validate, main
   #
   # adapter and check refer to each other (Project lives in check, and check calls the adapters). That
   # one import is allowed on purpose (a bare `crate::x` is listed beside `crate::x::**`, since `use crate::x::{self}` is the module itself); anything else going the wrong way is a mistake.
@@ -89,6 +89,13 @@ rules:
     except_import: ["crate::config::**", "crate::config", "crate::select::**", "crate::select"]
     rationale: config.rs defines the model every other module is written against, and select.rs is self-contained. Neither may depend on the rest.
     fix: Move the shared type down into src/config.rs, or pass the value in as an argument.
+
+  data-depends-on-config-and-source:
+    language: rust
+    forbid_import: ["crate::**"]
+    except_import: ["crate::data", "crate::data::**", "crate::config", "crate::config::**", "crate::source", "crate::source::**"]
+    rationale: data.rs turns JSON, YAML and TOML syntax trees into one value model. It reads parsed files and rule settings, and nothing that evaluates rules.
+    fix: Pass what data.rs needs in as an argument.
 
   io-modules-depend-on-config-only:
     language: rust
@@ -107,7 +114,7 @@ rules:
   engine-depends-on-adapters-and-source:
     language: rust
     forbid_import: ["crate::**"]
-    except_import: ["crate::check::**", "crate::check", "crate::adapter::**", "crate::adapter", "crate::config::**", "crate::config", "crate::source::**", "crate::source"]
+    except_import: ["crate::check::**", "crate::check", "crate::adapter::**", "crate::adapter", "crate::data::**", "crate::data", "crate::config::**", "crate::config", "crate::source::**", "crate::source"]
     rationale: The engine evaluates rules. It must not depend on the commands that call it or on the modules built on top of it (suppress, select, scope, validate).
     fix: Pass what the engine needs in as an argument.
 
@@ -117,6 +124,22 @@ rules:
     except_import: ["crate::suppress::**", "crate::suppress", "crate::check::**", "crate::check", "crate::source::**", "crate::source"]
     rationale: suppress.rs reads comments from parsed files. It must not depend on the commands.
     fix: Return what the commands need and let them combine it.
+
+  # ---- Data files -------------------------------------------------------------------------------
+
+  no-wildcard-dependency-versions:
+    language: toml
+    property_value:
+      names: ["dependencies.*", "dependencies.*.version", "dev-dependencies.*", "dev-dependencies.*.version"]
+      forbid_value: ["[*]"]    # a glob, so a literal star is written [*]
+    rationale: A `*` requirement accepts any release, including breaking ones, so a fresh build can differ from the last.
+    fix: Require the version in use, e.g. "1.0.104".
+
+  recipes-explain-themselves:
+    language: yaml
+    require_property: [rules, scopes, "rules.*.rationale", "rules.*.fix"]
+    rationale: A cookbook recipe is copied into other projects, where `prlint explain` is all a reader has.
+    fix: Give every rule a rationale and a fix, and the recipe a scopes section.
 
   # ---- Repository layout ------------------------------------------------------------------------
 
@@ -130,11 +153,12 @@ scopes:
     include: ["src/**"]
     exclude: ["src/source.rs"]
 
-  # Excluded: suppress.rs asks only whether a node is a comment, which every grammar names
-  # `comment` or `*_comment`, and validate.rs calls .kind() on glob errors, not syntax nodes.
+  # Excluded: data.rs is the adapter for JSON, YAML and TOML, suppress.rs asks only whether a node is a
+  # comment, which every grammar names `comment` or `*_comment`, and validate.rs calls .kind() on glob
+  # errors, not syntax nodes.
   - rules: [node-kinds-only-in-adapters]
     include: ["src/**"]
-    exclude: ["src/adapter.rs", "src/suppress.rs", "src/validate.rs"]
+    exclude: ["src/adapter.rs", "src/data.rs", "src/suppress.rs", "src/validate.rs"]
 
   - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections]
     include: ["src/**"]
@@ -145,6 +169,9 @@ scopes:
 
   - rules: [foundation-modules-import-nothing]
     include: ["src/config.rs", "src/select.rs"]
+
+  - rules: [data-depends-on-config-and-source]
+    include: ["src/data.rs"]
 
   - rules: [io-modules-depend-on-config-only]
     include: ["src/source.rs", "src/scope.rs"]
@@ -157,6 +184,12 @@ scopes:
 
   - rules: [suppression-depends-on-engine-and-source]
     include: ["src/suppress.rs"]
+
+  - rules: [no-wildcard-dependency-versions]
+    include: ["Cargo.toml"]
+
+  - rules: [recipes-explain-themselves]
+    include: ["cookbook/**/*.yaml"]
 
   - rules: [cookbook-file-names]
     include: ["cookbook/**"]

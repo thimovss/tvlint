@@ -1,0 +1,13 @@
+# Every crate declares its license and minimum Rust version
+# Both are what downstream users and cargo-deny need to decide whether they can use the crate.
+
+rules:
+  crates-declare-metadata:
+    language: toml
+    require_property: [package.license, package.rust-version, package.description]
+    rationale: A crate without a license is unusable for most companies, and without rust-version nobody knows which compilers it supports.
+    fix: Add `license`, `rust-version` and `description` under [package].
+
+scopes:
+  - rules: [crates-declare-metadata]
+    include: ["Cargo.toml", "crates/*/Cargo.toml"]

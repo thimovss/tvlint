@@ -1,0 +1,13 @@
+# No install-time scripts
+# preinstall, install and postinstall run arbitrary code on every developer machine and CI runner.
+
+rules:
+  no-install-scripts:
+    language: json
+    forbid_property: [scripts.preinstall, scripts.install, scripts.postinstall]
+    rationale: Install scripts run arbitrary code on every machine that installs the package, including when a dependency is compromised.
+    fix: Run the step explicitly (in CI, or a documented `npm run setup`) instead of on install.
+
+scopes:
+  - rules: [no-install-scripts]
+    include: ["package.json", "packages/*/package.json", "apps/*/package.json"]

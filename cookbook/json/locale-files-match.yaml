@@ -1,0 +1,26 @@
+# Every translation file has the same keys and placeholders
+# en.json is the reference. A key missing from nl.json shows up as a raw key in the UI, and a
+# key that only exists in nl.json is dead text. A translation that drops {{name}} shows the
+# user a sentence with a hole in it.
+
+rules:
+  locale-files-match:
+    language: json
+    same_keys_as: src/locales/en.json
+    same_placeholders: true
+    rationale: A missing key renders as a raw key in the UI, an extra one is dead text, and a changed placeholder breaks the sentence.
+    fix: Add the missing keys (translated), delete the extra ones, and keep each {{placeholder}} as in en.json.
+
+  no-untranslated-placeholders:
+    language: json
+    property_value:
+      names: ["**"]
+      forbid_value: ["*TRANSLATION_MISSING*", "*TODO*translate*"]
+    rationale: Extraction tools write a marker for strings nobody translated yet. Shipping one shows the marker to users.
+    fix: Translate the string.
+
+scopes:
+  - rules: [locale-files-match]
+    include: ["src/locales/*.json"]
+  - rules: [no-untranslated-placeholders]
+    include: ["src/locales/*.json"]

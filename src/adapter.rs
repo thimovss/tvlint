@@ -58,6 +58,16 @@ pub trait Adapter: Sync {
         false
     }
 
+    /// If `node` is a call, its leading positional arguments, up to the first spread or keyword argument.
+    fn call_arguments<'t>(&self, _node: Node<'t>) -> Option<Vec<Node<'t>>> {
+        None
+    }
+
+    /// The text of a plain string literal (no interpolation), without its quotes.
+    fn string_value(&self, _node: Node, _src: &str) -> Option<String> {
+        None
+    }
+
     /// If `node` is an array literal, its elements.
     fn array_elements<'t>(&self, _node: Node<'t>) -> Option<Vec<Node<'t>>> {
         None
@@ -79,6 +89,20 @@ pub fn for_language(language: Language) -> &'static dyn Adapter {
         Language::Python => &Python,
         Language::JavaScript | Language::TypeScript => &EcmaScript,
         Language::Rust => &Rust,
+        Language::Json | Language::Yaml | Language::Toml => &Data,
+    }
+}
+
+/// Data files are read through `data::Doc`, not through syntax questions: nothing here applies.
+struct Data;
+
+impl Adapter for Data {
+    fn raised_name(&self, _node: Node, _src: &str) -> Option<String> {
+        None
+    }
+
+    fn call_name(&self, _node: Node, _src: &str) -> Option<String> {
+        None
     }
 }
 
@@ -121,6 +145,37 @@ impl Adapter for Python {
             return None;
         }
         Some(callee_name(node.child_by_field_name("function")?, src))
+    }
+
+    fn call_arguments<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {
+        if node.kind() != "call" {
+            return None;
+        }
+        let arguments = node.child_by_field_name("arguments")?;
+        let mut cursor = arguments.walk();
+        let mut positional = Vec::new();
+        for argument in arguments.named_children(&mut cursor).filter(|n| n.kind() != "comment") {
+            if matches!(argument.kind(), "keyword_argument" | "list_splat" | "dictionary_splat") {
+                break;
+            }
+            positional.push(argument);
+        }
+        Some(positional)
+    }
+
+    fn string_value(&self, node: Node, src: &str) -> Option<String> {
+        if node.kind() != "string" {
+            return None;
+        }
+        let raw = text(node, src);
+        let quote = raw.find(['"', '\''])?;
+        // f-strings interpolate; bytes are not text; raw strings keep their backslashes (fine for ids).
+        if raw[..quote].contains(['f', 'F', 'b', 'B']) {
+            return None;
+        }
+        let rest = &raw[quote..];
+        let quotes = if rest.starts_with("\"\"\"") || rest.starts_with("'''") { 3 } else { 1 };
+        rest.get(quotes..rest.len().checked_sub(quotes)?).map(str::to_string)
     }
 
     fn caught_types(&self, node: Node, src: &str) -> Option<Vec<String>> {
@@ -273,6 +328,26 @@ impl Adapter for EcmaScript {
 
     fn is_string_literal(&self, node: Node, src: &str) -> bool {
         Self::string_value(node, src).is_some()
+    }
+
+    fn call_arguments<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {
+        if !matches!(node.kind(), "call_expression" | "new_expression") {
+            return None;
+        }
+        let arguments = node.child_by_field_name("arguments")?;
+        let mut cursor = arguments.walk();
+        let mut positional = Vec::new();
+        for argument in arguments.named_children(&mut cursor).filter(|n| n.kind() != "comment") {
+            if argument.kind() == "spread_element" {
+                break;
+            }
+            positional.push(argument);
+        }
+        Some(positional)
+    }
+
+    fn string_value(&self, node: Node, src: &str) -> Option<String> {
+        Self::string_value(node, src)
     }
 
     fn array_elements<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {
@@ -451,6 +526,25 @@ impl Adapter for Rust {
             "macro_invocation" => Some(format!("{}!", rs_callee_name(node.child_by_field_name("macro")?, src))),
             _ => None,
         }
+    }
+
+    fn call_arguments<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {
+        if node.kind() != "call_expression" {
+            return None;
+        }
+        let arguments = node.child_by_field_name("arguments")?;
+        let mut cursor = arguments.walk();
+        Some(arguments.named_children(&mut cursor).filter(|n| !n.kind().ends_with("comment")).collect())
+    }
+
+    fn string_value(&self, node: Node, src: &str) -> Option<String> {
+        if node.kind() != "string_literal" {
+            return None;
+        }
+        let raw = text(node, src);
+        let inner = raw.strip_prefix('"').and_then(|r| r.strip_suffix('"'))?;
+        // Escapes would need decoding; an identifier-like literal never has any.
+        (!inner.contains('\\')).then(|| inner.to_string())
     }
 
     /// `use a::b`, `use a::{b, c::d}`, `use a::*`, `use a as b`, and `extern crate a`.

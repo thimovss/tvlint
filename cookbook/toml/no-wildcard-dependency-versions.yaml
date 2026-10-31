@@ -1,0 +1,21 @@
+# No "*" dependency requirements in Cargo.toml
+# "*" accepts any release, breaking ones included. (Values are globs, so a literal star is [*].)
+
+rules:
+  no-wildcard-dependency-versions:
+    language: toml
+    property_value:
+      names:
+        - "dependencies.*"
+        - "dependencies.*.version"
+        - "dev-dependencies.*"
+        - "dev-dependencies.*.version"
+        - "build-dependencies.*"
+        - "build-dependencies.*.version"
+      forbid_value: ["[*]"]
+    rationale: A `*` requirement accepts any release, including breaking ones, so a fresh build can differ from the last.
+    fix: Require the version in use, e.g. "1.0.104".
+
+scopes:
+  - rules: [no-wildcard-dependency-versions]
+    include: ["Cargo.toml", "crates/*/Cargo.toml"]

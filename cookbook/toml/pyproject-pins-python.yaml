@@ -1,0 +1,13 @@
+# pyproject.toml declares the Python version and a build backend
+# Without requires-python, installers happily install the package on an interpreter it does not support.
+
+rules:
+  pyproject-declares-python:
+    language: toml
+    require_property: [project.requires-python, build-system.build-backend]
+    rationale: Without requires-python the package installs on interpreters it was never tested with.
+    fix: Add `requires-python` under [project] and `build-backend` under [build-system].
+
+scopes:
+  - rules: [pyproject-declares-python]
+    include: ["pyproject.toml", "packages/*/pyproject.toml"]

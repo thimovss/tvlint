@@ -34,6 +34,7 @@ prlint validate -c cookbook/python/no-wall-clock-in-tests.yaml
 - [Keep HTTP out of the domain layer](no-http-in-domain.yaml)
 - [Routers must not catch domain exceptions](no-catching-domain-errors-in-routers.yaml)
 - [Do not use `.one()` to load a single row](no-query-one.yaml)
+- [Every error code raised is listed in error_codes.json](error-codes-are-registered.yaml)
 
 ### Determinism
 

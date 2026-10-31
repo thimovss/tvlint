@@ -1,0 +1,13 @@
+# Every workflow job has a timeout
+# The default is six hours. A hung test run costs six hours of runner time and blocks the queue.
+
+rules:
+  workflow-jobs-have-timeouts:
+    language: yaml
+    require_property: ["jobs.*.timeout-minutes"]
+    rationale: Without timeout-minutes a stuck job runs for six hours before it is cancelled.
+    fix: Add timeout-minutes to the job, with a value comfortably above its normal run time.
+
+scopes:
+  - rules: [workflow-jobs-have-timeouts]
+    include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]

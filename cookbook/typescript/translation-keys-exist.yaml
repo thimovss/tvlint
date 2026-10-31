@@ -1,0 +1,22 @@
+# Every t("key") exists in the English translations
+# A typo in a key renders as the raw key at runtime, and nothing fails until someone looks at the page.
+# The registry is the reference locale; `use: path` names each string by its dotted path, so
+# t("menu.home") matches {"menu": {"home": "Home"}}.
+
+rules:
+  translation-keys-exist:
+    language: [typescript, javascript]
+    literal_argument:
+      calls: [t, i18n.t]
+      position: 0
+      registry:
+        file: src/locales/en.json
+        path: "**"
+        use: path
+    rationale: A misspelled translation key renders as the raw key in the UI, and the type checker does not see it.
+    fix: Use an existing key from src/locales/en.json, or add the string there first.
+
+scopes:
+  - rules: [translation-keys-exist]
+    include: ["src/**"]
+    exclude: ["src/**/*.test.ts", "src/**/*.test.tsx"]

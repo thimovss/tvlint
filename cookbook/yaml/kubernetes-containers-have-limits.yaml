@@ -1,0 +1,25 @@
+# Kubernetes containers declare resource limits and probes
+# A container without limits can starve its neighbours; without a readiness probe it receives
+# traffic before it can serve it. The paths are for a Deployment: adjust spec.template.spec for
+# other kinds (a bare Pod uses spec.containers).
+
+rules:
+  containers-have-limits:
+    language: yaml
+    require_property:
+      - spec.template.spec.containers.*.resources
+      - spec.template.spec.containers.*.readinessProbe
+    rationale: A container without resource limits can starve the node, and one without a readiness probe gets traffic before it is ready.
+    fix: Add `resources.limits` (and requests) and a `readinessProbe` to every container.
+
+  no-privileged-containers:
+    language: yaml
+    property_value:
+      names: ["spec.template.spec.containers.*.securityContext.privileged"]
+      forbid_value: ["true"]
+    rationale: A privileged container has nearly the access of the node it runs on.
+    fix: 'Remove `privileged: true` and add only the capability the container needs.'
+
+scopes:
+  - rules: [containers-have-limits, no-privileged-containers]
+    include: ["deploy/**/*.yaml", "k8s/**/*.yaml"]

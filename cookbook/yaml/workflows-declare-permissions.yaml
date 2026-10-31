@@ -1,0 +1,22 @@
+# Workflows declare the permissions they need
+# Without a permissions block the token gets the repository default, which is often write access
+# to everything.
+
+rules:
+  workflows-declare-permissions:
+    language: yaml
+    require_property: [permissions]
+    rationale: A workflow without a permissions block runs with the repository's default token, which is often read-write on everything.
+    fix: 'Add a top-level `permissions:` block with the least access the jobs need, e.g. `contents: read`.'
+
+  no-write-all:
+    language: yaml
+    property_value:
+      names: ["permissions", "jobs.*.permissions"]
+      forbid_value: [write-all]
+    rationale: write-all gives every step in the job full write access to the repository.
+    fix: 'List the permissions the job needs, e.g. `contents: read` and `pull-requests: write`.'
+
+scopes:
+  - rules: [workflows-declare-permissions, no-write-all]
+    include: [".github/workflows/*.yml", ".github/workflows/*.yaml"]

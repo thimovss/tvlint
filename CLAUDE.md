@@ -14,6 +14,8 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
 
 **Multi-language by design:** the product must work across languages, not just one ecosystem. The same rule file should apply to a polyglot repo (e.g. a TypeScript frontend and a Python backend) and produce consistent results. We start with **JavaScript, TypeScript, and Python**, but nothing in the core engine, rule schema, or output formats may be hard-wired to a specific language. Adding a language should mean adding a tree-sitter grammar and a language adapter, not changing the engine or the rules.
 
+**Data files are first-class:** JSON, YAML, and TOML are read into one path-addressable value model (`jobs.*.timeout-minutes`), so the same rule works in every format. Rules can also tie code to data, e.g. every error code raised must be registered in `error_codes.json`, or every translation file must have the same keys.
+
 ## Target Users
 
 - **Primary:** engineering teams (5-100 devs) adopting AI coding tools who see growing review burden and drift.

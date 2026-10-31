@@ -1,0 +1,17 @@
+# Dependencies are pinned to exact versions
+# A range (^1.2.0, ~1.2.0) or a tag (latest) lets two installs of the same commit differ.
+# Lock files help, but only if every install respects them; pinning in package.json makes the
+# manifest itself the source of truth.
+
+rules:
+  pinned-npm-versions:
+    language: json
+    property_value:
+      names: ["dependencies.*", "devDependencies.*", "peerDependencies.*"]
+      forbid_value: ["^*", "~*", ">*", "<*", "latest", "next", "[*]"]
+    rationale: A version range or tag makes two installs of the same commit differ, and a bad release reaches production unreviewed.
+    fix: Pin the exact version in use, e.g. "18.2.0".
+
+scopes:
+  - rules: [pinned-npm-versions]
+    include: ["package.json", "packages/*/package.json", "apps/*/package.json"]

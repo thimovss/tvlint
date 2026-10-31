@@ -1,6 +1,7 @@
 mod adapter;
 mod check;
 mod config;
+mod data;
 mod scope;
 mod select;
 mod source;
@@ -14,7 +15,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename};
+use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename, normalize_file, unused_registry_entries};
 use config::Config;
 use scope::CompiledScope;
 use suppress::Suppressions;
@@ -53,7 +54,11 @@ enum Command {
     List,
     /// Check the config file for mistakes and explain every problem (exit 1 if invalid)
     Validate,
+    /// Print the JSON Schema of the config file, for editors and AI agents that write rules
+    Schema,
 }
+
+pub const SCHEMA: &str = include_str!("../schema/prlint.schema.json");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -62,6 +67,10 @@ fn main() -> ExitCode {
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
         Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
+        Command::Schema => {
+            print!("{SCHEMA}");
+            Ok(0)
+        }
     };
     match result {
         Ok(code) => ExitCode::from(code),
@@ -122,7 +131,15 @@ fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
         eprintln!("prlint: warning: `{unmatched}` matches no file (files ignored by .gitignore are skipped)");
     }
     let known_paths: std::collections::HashSet<String> = all_paths.iter().cloned().collect();
-    let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths };
+    let docs: BTreeMap<String, data::Doc> =
+        files.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), data::Doc::build(f))).collect();
+    for (id, rule) in &config.rules {
+        let reads = rule.same_keys_as.iter().chain(rule.literal_argument.iter().map(|a| &a.registry.file));
+        if let Some(file) = reads.map(|f| normalize_file(f)).find(|f| !docs.contains_key(f)) {
+            bail!("rule `{id}` reads {file}, which is not a JSON, YAML or TOML file in the project (paths are relative to the config; ignored files are skipped)");
+        }
+    }
+    let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths, docs: &docs };
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {
@@ -162,6 +179,28 @@ fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
         });
         suppressed += hidden;
         violations.extend(kept);
+    }
+
+    // Registry entries that nothing uses are reported in the registry file, from every file in scope.
+    for (id, rule) in rules.iter().filter(|(_, r)| r.literal.as_ref().is_some_and(|l| l.report_unused)) {
+        let Some(registry) = rule.literal.as_ref().map(|l| l.file.as_str()) else { continue };
+        let Some(registry_idx) = files.iter().position(|f| f.path == registry) else { continue };
+        if !selected(registry) || suppressions[registry_idx].ignore_file {
+            continue;
+        }
+        let users = files.iter().filter(|f| {
+            !f.language.is_data()
+                && rule.rule.applies_to(f.language)
+                && scopes.iter().any(|s| s.rules.iter().any(|r| r == id) && s.matches(&f.path))
+        });
+        checked.insert(registry);
+        let mut unused = unused_registry_entries(rule, users, &ctx);
+        unused.retain(|v| {
+            let hide = suppressions[registry_idx].hides(v.line);
+            suppressed += usize::from(hide);
+            !hide
+        });
+        violations.extend(unused);
     }
 
     // File-name rules look at every file, not only the ones we can parse.

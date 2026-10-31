@@ -21,10 +21,26 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Rust,
+    Json,
+    Yaml,
+    Toml,
 }
 
 impl Language {
-    pub const ALL: &'static [Language] = &[Language::Python, Language::JavaScript, Language::TypeScript, Language::Rust];
+    pub const ALL: &'static [Language] = &[
+        Language::Python,
+        Language::JavaScript,
+        Language::TypeScript,
+        Language::Rust,
+        Language::Json,
+        Language::Yaml,
+        Language::Toml,
+    ];
+
+    /// JSON, YAML and TOML: data files, checked by path instead of by syntax.
+    pub fn is_data(self) -> bool {
+        matches!(self, Language::Json | Language::Yaml | Language::Toml)
+    }
 
     pub fn name(self) -> &'static str {
         match self {
@@ -32,6 +48,9 @@ impl Language {
             Language::JavaScript => "javascript",
             Language::TypeScript => "typescript",
             Language::Rust => "rust",
+            Language::Json => "json",
+            Language::Yaml => "yaml",
+            Language::Toml => "toml",
         }
     }
 
@@ -42,6 +61,9 @@ impl Language {
     /// Whether the language can express the check behind a rule key.
     pub fn supports(self, key: &str) -> bool {
         use Language::*;
+        if self.is_data() {
+            return matches!(key, "forbid_property" | "property_value" | "require_property" | "same_keys_as" | "same_placeholders");
+        }
         match key {
             "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
             "forbid_catch" => self == Python,
@@ -49,13 +71,18 @@ impl Language {
             "forbid_element" | "forbid_property" | "property_value" | "within_property" => {
                 matches!(self, JavaScript | TypeScript)
             }
+            "require_property" | "same_keys_as" | "same_placeholders" => false,
             _ => true,
         }
     }
 
     /// Why a key is not available, and what to use instead.
     pub fn unsupported_hint(self, key: &str) -> &'static str {
+        if self.is_data() {
+            return "JSON, YAML and TOML files are checked by key path: use forbid_property, require_property, property_value, same_keys_as";
+        }
         match (self, key) {
+            (_, "require_property" | "same_keys_as" | "same_placeholders") => "these checks read JSON, YAML and TOML files",
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""
             }
@@ -72,6 +99,9 @@ impl Language {
             "rs" => Some(Language::Rust),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
+            "json" | "jsonc" => Some(Language::Json),
+            "yaml" | "yml" => Some(Language::Yaml),
+            "toml" => Some(Language::Toml),
             _ => None,
         }
     }
@@ -136,6 +166,16 @@ pub struct Rule {
     /// an object-literal property with one of these names, e.g. `onError`.
     #[serde(default)]
     pub within_property: Vec<String>,
+    /// Key paths that must exist, e.g. `jobs.*.timeout-minutes`: every match of the parent path must have the key.
+    #[serde(default)]
+    pub require_property: Vec<String>,
+    /// A file (relative to the config) whose key paths every matched data file must have too.
+    pub same_keys_as: Option<String>,
+    /// Also require the `{{placeholders}}` of each shared message to be the same as in `same_keys_as`.
+    #[serde(default)]
+    pub same_placeholders: bool,
+    /// String literals passed to calls must be listed in a data file.
+    pub literal_argument: Option<LiteralArgument>,
     /// Every matched file's name must match one of these globs.
     #[serde(default)]
     pub require_filename: Vec<String>,
@@ -156,6 +196,52 @@ pub struct PropertyValue {
     pub forbid_literal: bool,
     /// An array-literal value must start with this element (matched as a glob on its source text).
     pub array_starts_with: Option<String>,
+    /// Data files: the value must not match any of these globs, e.g. `^*` or `*:latest`.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub forbid_value: Vec<String>,
+    /// Data files: the value must match one of these globs.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub require_value: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LiteralArgument {
+    /// Calls whose argument is checked, as patterns like `forbid_call`.
+    #[serde(deserialize_with = "string_or_list")]
+    pub calls: Vec<String>,
+    /// Which argument, counting from 0.
+    #[serde(default)]
+    pub position: usize,
+    pub registry: Registry,
+    /// Also report registry entries that no call in scope uses.
+    #[serde(default)]
+    pub report_unused: bool,
+}
+
+/// What a registry entry is called: the matched key, the matched scalar, or the scalar's full path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Use {
+    Key,
+    Value,
+    Path,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Registry {
+    /// The data file listing the allowed values, relative to the config.
+    pub file: String,
+    /// Which nodes of the file are entries.
+    pub path: String,
+    /// What an entry is called: its `key`, its `value` (default) or its full `path`.
+    #[serde(default = "default_use", rename = "use")]
+    pub use_: Use,
+}
+
+fn default_use() -> Use {
+    Use::Value
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,6 +277,10 @@ impl Rule {
             ("forbid_property", !self.forbid_property.is_empty()),
             ("property_value", self.property_value.is_some()),
             ("within_property", !self.within_property.is_empty()),
+            ("require_property", !self.require_property.is_empty()),
+            ("same_keys_as", self.same_keys_as.is_some()),
+            ("same_placeholders", self.same_placeholders),
+            ("literal_argument", self.literal_argument.is_some()),
         ] {
             if present {
                 keys.push(key);
@@ -235,6 +325,12 @@ impl Rule {
         }
         if let Some(pv) = &self.property_value {
             let mut parts = Vec::new();
+            if !pv.forbid_value.is_empty() {
+                parts.push(format!("the value {}", pv.forbid_value.join(", ")));
+            }
+            if !pv.require_value.is_empty() {
+                parts.push(format!("any value but {}", pv.require_value.join(", ")));
+            }
             if pv.forbid_literal {
                 parts.push("string literals".to_string());
             }
@@ -243,6 +339,22 @@ impl Rule {
             }
             let context = if pv.in_call.is_empty() { String::new() } else { format!(" in {}(...)", pv.in_call.join("/")) };
             out.push(format!("{} as the value of {}{context}", parts.join(" or "), pv.names.join(", ")));
+        }
+        if !self.require_property.is_empty() {
+            out.push(format!("files without the key {}", self.require_property.join(", ")));
+        }
+        if let Some(reference) = &self.same_keys_as {
+            let what = if self.same_placeholders { "keys and {{placeholders}}" } else { "keys" };
+            out.push(format!("files whose {what} differ from {reference}"));
+        }
+        if let Some(arg) = &self.literal_argument {
+            let unused = if arg.report_unused { ", and entries nothing uses" } else { "" };
+            out.push(format!(
+                "argument {} of {} that is not in {}{unused}",
+                arg.position,
+                arg.calls.join("/"),
+                arg.registry.file
+            ));
         }
         if !self.within_property.is_empty() {
             out.push(format!("(only inside a property named {})", self.within_property.join(", ")));
@@ -288,7 +400,7 @@ impl Config {
     fn validate(&self) -> Result<()> {
         for (id, rule) in &self.rules {
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
-                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value or require_filename)");
+                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument or require_filename)");
             }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
@@ -306,11 +418,34 @@ impl Config {
             {
                 bail!("rule `{id}`: within_property needs forbid_call, forbid_raise or forbid_element");
             }
-            if let Some(pv) = &rule.property_value
-                && !pv.forbid_literal
-                && pv.array_starts_with.is_none()
+            let data = rule.language.iter().any(|l| l.is_data());
+            if data && rule.language.iter().any(|l| !l.is_data()) {
+                bail!("rule `{id}`: JSON, YAML and TOML cannot share a rule with code languages; make one rule for each");
+            }
+            if let Some(pv) = &rule.property_value {
+                if data {
+                    if pv.forbid_literal || pv.array_starts_with.is_some() || !pv.in_call.is_empty() {
+                        bail!("rule `{id}`: for data files property_value takes `names`, `forbid_value` and `require_value` (not forbid_literal, array_starts_with or in_call)");
+                    }
+                    if pv.forbid_value.is_empty() && pv.require_value.is_empty() {
+                        bail!("rule `{id}`: property_value needs forbid_value or require_value");
+                    }
+                } else {
+                    if !pv.forbid_value.is_empty() || !pv.require_value.is_empty() {
+                        bail!("rule `{id}`: forbid_value and require_value read JSON, YAML and TOML; for code use forbid_literal or array_starts_with");
+                    }
+                    if !pv.forbid_literal && pv.array_starts_with.is_none() {
+                        bail!("rule `{id}`: property_value needs forbid_literal or array_starts_with");
+                    }
+                }
+            }
+            if rule.same_placeholders && rule.same_keys_as.is_none() {
+                bail!("rule `{id}`: same_placeholders needs same_keys_as");
+            }
+            if let Some(arg) = &rule.literal_argument
+                && arg.calls.is_empty()
             {
-                bail!("rule `{id}`: property_value needs forbid_literal or array_starts_with");
+                bail!("rule `{id}`: literal_argument needs at least one call in `calls`");
             }
         }
         for scope in &self.scopes {

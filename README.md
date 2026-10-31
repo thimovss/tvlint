@@ -89,8 +89,13 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
 | `rust` | `.rs` |
+| `json` | `.json`, `.jsonc` |
+| `yaml` | `.yaml`, `.yml` |
+| `toml` | `.toml` |
 
 Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `prlint validate` says so when a rule asks a language for something it cannot do.
+
+JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 
 ## Suppressing violations
 
@@ -122,6 +127,83 @@ raise ValueError("not found")
 - An ignored file is still read to learn its classes, so other files' `forbid_catch` results do not change when a file opts out.
 - Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `prlint: 7 violation(s) in 4 file(s) [5 hidden by prlint-ignore-next-line, 3 file(s) skipped by prlint-ignore-file]`.
 
+## Data files
+
+JSON, YAML and TOML files are read into one model of maps, lists and values, so the same rule works whichever format a file uses. Rules address a value by **key path**, anchored at the root of the file:
+
+| Path | Matches |
+|---|---|
+| `scripts.postinstall` | the `postinstall` key inside `scripts` |
+| `jobs.*.runs-on` | `runs-on` in every job. `*` is any one key **or list index** |
+| `jobs.*.steps.*.uses` | `uses` in every step of every job (list items are addressed by index) |
+| `**.version` | `version` at any depth, including the top level |
+| `dependencies.@types/*` | a `*` or `?` inside a segment is a glob on that key |
+| `"a.b".c` | a key that contains a dot goes in double quotes |
+
+- **`forbid_property`** reports the key where it is written.
+- **`require_property`** splits the path into the container and the key: `jobs.*.timeout-minutes` means "every job has `timeout-minutes`". A container that does not exist (`permissions.contents` when there is no `permissions`) is reported once for the file; a wildcard container that matches nothing is fine. The last segment must be a key name. In a multi-document YAML file every document is checked.
+- **`property_value`** looks at the scalar values at the `names` paths, with `forbid_value: [globs]` (none may match) and/or `require_value: [globs]` (one must match). Values are plain text, so `true`, `"true"` and `1.0` are just the text of the value, and quotes and escapes are removed. Lists and mappings are skipped. Values are globs, where `*` matches anything: write a literal star as `[*]` (`forbid_value: ["[*]"]` forbids a wildcard version).
+- **`same_keys_as`** compares the keys of every in-scope file with a reference file (usually the source-language translation): `a.b` must exist in both. Lists count as values. Add `same_placeholders: true` to also compare the `{{name}}`, `{name}` and ICU `{count, plural, ...}` names in each message.
+- Comments work as in code: in YAML and TOML, `# prlint-ignore-next-line` hides the violations of the next line, and `# prlint-ignore-file` on line 1 skips the file. JSON has no comments (use `.jsonc` files to suppress).
+- YAML aliases (`*name`) and merge keys (`<<`) are not resolved; an alias is a value whose text is `*name`.
+
+```yaml
+rules:
+  workflow-jobs-have-timeouts:
+    language: yaml
+    require_property: ["jobs.*.timeout-minutes"]
+    rationale: A hung job runs for six hours.
+    fix: Add timeout-minutes to the job.
+
+  pinned-npm-versions:
+    language: json
+    property_value:
+      names: ["dependencies.*", "devDependencies.*"]
+      forbid_value: ["^*", "~*", latest]
+    rationale: Ranges make installs differ between machines.
+    fix: Pin the exact version.
+
+  locale-files-match:
+    language: json
+    same_keys_as: src/locales/en.json
+    same_placeholders: true
+    rationale: A missing key renders as a raw key in the UI.
+    fix: Add the missing keys, translated.
+
+scopes:
+  - rules: [workflow-jobs-have-timeouts]
+    include: [".github/workflows/*.yml"]
+  - rules: [pinned-npm-versions]
+    include: ["package.json"]
+  - rules: [locale-files-match]
+    include: ["src/locales/*.json"]
+```
+
+### Code that must match a data file
+
+`literal_argument` ties code to a data file: string literals passed to certain calls must be entries of a registry.
+
+```yaml
+rules:
+  error-codes-are-registered:
+    language: python
+    literal_argument:
+      calls: ["*Exception"]            # patterns, as in forbid_call
+      position: 0                      # which argument, counting from 0 (default 0)
+      registry:
+        file: backend/error_codes.json # relative to the config
+        path: "codes.*"                # key path selecting the entries
+        use: value                     # what an entry is called: value (default), key or path
+      report_unused: true              # also report entries that no call uses
+    rationale: The frontend translates errors by code.
+    fix: Add the code to backend/error_codes.json.
+```
+
+- `use: value` takes the scalar values at `path`, `use: key` their keys, and `use: path` the full dotted path of each scalar, so `t("menu.home")` matches `{"menu": {"home": "Home"}}` with `path: "**"`.
+- Only plain string literals are checked: an argument that is a variable, an f-string or a template with `${}` is skipped, as is a call with a spread before the argument.
+- `report_unused` reports each entry that no call in the rule's scope passes, in the registry file, at the entry. With `--staged` or `PATH` arguments the usage is still collected from the whole scope, and the entries are reported only if the registry file is selected.
+- The registry file must exist and be JSON, YAML or TOML (`validate` checks, and warns when `path` selects nothing).
+
 ## Config
 
 Looking for rules to start from? See the [cookbook](cookbook/).
@@ -147,15 +229,19 @@ scopes:
 
 | Key | Meaning |
 |---|---|
-| `language` | `python`, `javascript`, `typescript` or `rust`, or a list such as `[javascript, typescript]`. Limits the rule to files of those languages. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
+| `language` | `python`, `javascript`, `typescript`, `rust`, `json`, `yaml` or `toml`, or a list such as `[javascript, typescript]`. Limits the rule to files of those languages. Required with every check except `require_filename`. Optional with `require_filename`, where omitting it applies the rule to every file type. |
 | `forbid_raise` | Python, JavaScript and TypeScript. Exception names that may not be raised (`throw` in JavaScript and TypeScript, where `throw new Foo()` names `Foo`). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
 | `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. In Rust, functions are written with `::` (`std::fs::read`, `Vec::new`), methods with `.` (`*.unwrap` matches `s.parse::<i32>().unwrap()`), and macros with their `!` (`println!`); calls inside a macro's arguments are not seen. Imports and aliases are not resolved. |
 | `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
 | `forbid_import` | JavaScript, TypeScript and Rust. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`; in Rust `use` and `extern crate`, where `use a::{b, c}` counts as `a::b` and `a::c`, and `self::` and `super::` are resolved to `crate::` paths). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). Rust patterns are written with `::` (`sqlx::**`, `crate::db::**`). |
 | `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. |
 | `forbid_element` | JavaScript and TypeScript. JSX element names that may not be used, e.g. `[button, textarea]`. Matched on the tag as written, so `button` does not match `Button`. |
-| `forbid_property` | JavaScript and TypeScript. Object-literal property names that may not appear (`{ onError: ... }`). JSX attributes such as `<img onError={...}>` are not properties. |
-| `property_value` | JavaScript and TypeScript. Constraints on the value of object-literal properties: `names` (required), then `forbid_literal: true` (the value may not be a string literal) and/or `array_starts_with: accountID` (an array-literal value must start with that element; other values are not checked). `in_call: toast.add` limits it to objects passed directly to that call. |
+| `forbid_property` | JavaScript and TypeScript: object-literal property names that may not appear (`{ onError: ... }`). JSX attributes such as `<img onError={...}>` are not properties. JSON, YAML and TOML: key paths that may not exist, e.g. `scripts.postinstall` ([key paths](#data-files)). |
+| `property_value` | JavaScript and TypeScript: constraints on the value of object-literal properties: `names` (required), then `forbid_literal: true` (the value may not be a string literal) and/or `array_starts_with: accountID` (an array-literal value must start with that element; other values are not checked). `in_call: toast.add` limits it to objects passed directly to that call. JSON, YAML and TOML: `names` are key paths, with `forbid_value` and/or `require_value` (globs, see [Data files](#data-files)). |
+| `require_property` | JSON, YAML and TOML. Key paths that must exist, e.g. `jobs.*.timeout-minutes`: every place the parent path (`jobs.*`) matches must contain the key. |
+| `same_keys_as` | JSON, YAML and TOML. Path to a reference file. Every file in the rule's scope must have exactly its keys: missing and extra keys are reported. The reference itself is skipped. |
+| `same_placeholders` | JSON, YAML and TOML. `true` also requires each shared message to use the same `{{name}}` / `{name}` placeholders as the reference. Needs `same_keys_as`. |
+| `literal_argument` | Python, JavaScript, TypeScript and Rust. String literals passed to calls must be listed in a data file, see [Code that must match a data file](#code-that-must-match-a-data-file). |
 | `within_property` | JavaScript and TypeScript. Narrows `forbid_call`, `forbid_raise` and `forbid_element` to hits that sit inside an object-literal property with one of these names, e.g. `onError`. |
 | `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
