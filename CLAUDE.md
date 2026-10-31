@@ -12,6 +12,8 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
 
 **Positioning:** not a general-purpose linter. It is the enforcement layer for the rules your team has, but nobody has encoded.
 
+**Multi-language by design:** the product must work across languages, not just one ecosystem. The same rule file should apply to a polyglot repo (e.g. a TypeScript frontend and a Python backend) and produce consistent results. We start with **JavaScript, TypeScript, and Python**, but nothing in the core engine, rule schema, or output formats may be hard-wired to a specific language. Adding a language should mean adding a tree-sitter grammar and a language adapter, not changing the engine or the rules.
+
 ## Target Users
 
 - **Primary:** engineering teams (5-100 devs) adopting AI coding tools who see growing review burden and drift.
@@ -23,7 +25,7 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
 
 - Single binary CLI (`lint check`, `lint init`, `lint explain <rule>`)
 - YAML rule files in `.lint/rules/`
-- Parsing via tree-sitter; **TypeScript and Python** first
+- Parsing via tree-sitter; **JavaScript, TypeScript, and Python** first, behind a language-agnostic adapter layer (see Architecture)
 - Four rule types:
   1. **Dependency boundaries:** `src/ui` may not import from `src/db`
   2. **Banned patterns:** forbid specific calls, imports, or syntax
@@ -54,6 +56,7 @@ Every rule carries a `rationale` and a `fix` field. These are returned in the ou
 ## Architecture
 
 - **Core engine (Rust):** file discovery (`ignore` crate), parallel parsing (`rayon` + tree-sitter), rule evaluation against a normalized import/symbol graph.
+- **Language adapters:** each supported language (JS, TS, Python at launch) implements a common adapter interface that maps its tree-sitter AST into the shared normalized model (imports, symbols, decorators/annotations, calls). Rule evaluation only sees the normalized model, so rules are language-independent. Rules may optionally scope to languages (e.g. `languages: [typescript, python]`); by default they apply to every language where the rule type makes sense. Language-specific concerns (module resolution, `tsconfig` paths, Python package roots, file extensions) live in the adapter, never in the engine.
 - **Rule loader:** `serde_yaml` with strict schema validation and clear error messages.
 - **Incremental mode:** cache parse results by file hash; check only changed files in PRs.
 - **Agent interface:** MCP server mode (`lint serve`) so coding agents can query rules before writing code and validate output after.
@@ -73,7 +76,7 @@ Ours: simple declarative rules, deterministic results, agent-readable feedback, 
 
 ## Roadmap
 
-1. **MVP (8-10 weeks):** engine, four rule types, CLI, GitHub Action, TS + Python.
+1. **MVP (8-10 weeks):** engine, four rule types, CLI, GitHub Action, JS/TS + Python via the language adapter layer.
 2. **v0.2:** MCP server, `lint init` that scaffolds starter rules, rule-hit analytics.
 3. **v0.3:** rule mining from the existing codebase ("92% of endpoints use X, 3 don't"), proposed as draft YAML.
 4. **v1.0:** optional LLM-evaluated rules (advisory by default, promotable to blocking), hosted dashboard, more languages.
@@ -83,7 +86,8 @@ Ours: simple declarative rules, deterministic results, agent-readable feedback, 
 - **False-positive fatigue** kills linters. Mitigate with precise rule semantics, easy but audited suppression, and a dry-run mode for new rules.
 - **Rule authoring friction.** Mitigate with good defaults, templates, and rule mining.
 - **Overlap with Semgrep.** Mitigate by staying focused on business rules and agent feedback, not breadth of pattern matching.
-- **Parser maintenance across languages.** Mitigate by starting with two and relying on tree-sitter's ecosystem.
+- **Parser maintenance across languages.** Mitigate by starting with JS/TS and Python, relying on tree-sitter's ecosystem, and keeping language-specific logic isolated in adapters so new languages are cheap to add.
+- **Language leakage into the core.** Easy to let one language's quirks (e.g. TS path aliases) shape the engine or rule schema. Mitigate by testing every rule type against more than one language.
 
 ## Success Metrics
 
