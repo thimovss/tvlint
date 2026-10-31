@@ -1,10 +1,10 @@
-# TVLint
+# <img src="icon.svg" alt="" width="36" height="36" align="absmiddle"> TVLint
 
 [![TVLint](https://github.com/thimovss/tvlint-poc/actions/workflows/tvlint.yml/badge.svg)](https://github.com/thimovss/tvlint-poc/actions/workflows/tvlint.yml)
 
 Enforce your team's code rules deterministically. Rules live in a YAML file, violations come back with a reason and a fix so both humans and AI agents can act on them.
 
-Supports Python, JavaScript, TypeScript and Rust.
+Supports Python, JavaScript, TypeScript, Rust, Go, HTML, shell and CSS, plus JSON, YAML and TOML data files.
 
 ## Install
 
