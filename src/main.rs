@@ -3,6 +3,7 @@ mod check;
 mod config;
 mod data;
 mod init;
+mod modules;
 mod report;
 mod scope;
 mod select;
@@ -163,12 +164,20 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
             bail!("rule `{id}` reads {file}, which is not a JSON, YAML or TOML file in the project (paths are relative to the config; ignored files are skipped)");
         }
     }
-    // tsconfig/jsconfig are only read when a rule needs to see where JS/TS imports lead.
-    let needs_aliases = config.rules.values().any(|r| {
-        !r.forbid_import.is_empty() && (r.applies_to(config::Language::JavaScript) || r.applies_to(config::Language::TypeScript))
-    });
-    let tsconfigs = if needs_aliases { tsconfig::TsConfigs::load(&root, &all_paths)? } else { tsconfig::TsConfigs::default() };
-    let ctx = Project { index: &index, aliases: &config.aliases, tsconfigs: &tsconfigs, paths: &known_paths, docs: &docs };
+    // Project files that say where imports lead are only read when a rule for that language checks imports.
+    let imports_checked = |languages: &[config::Language]| {
+        config.rules.values().any(|r| !r.forbid_import.is_empty() && languages.iter().any(|l| r.applies_to(*l)))
+    };
+    let modules = modules::Modules {
+        ts: if imports_checked(&[config::Language::JavaScript, config::Language::TypeScript]) {
+            tsconfig::TsConfigs::load(&root, &all_paths)?
+        } else {
+            Default::default()
+        },
+        go: if imports_checked(&[config::Language::Go]) { modules::GoModules::load(&root, &all_paths)? } else { Default::default() },
+        py: if imports_checked(&[config::Language::Python]) { modules::PythonRoots::load(&docs, &all_paths) } else { Default::default() },
+    };
+    let ctx = Project { index: &index, aliases: &config.aliases, modules: &modules, paths: &known_paths, docs: &docs };
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {

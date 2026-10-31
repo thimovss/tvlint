@@ -182,6 +182,43 @@ impl Adapter for Python {
         rest.get(quotes..rest.len().checked_sub(quotes)?).map(str::to_string)
     }
 
+    /// `import a.b as c`, `from a.b import c, d`, `from . import x` and `from ..p import *`.
+    /// A `from` import names `module.name` for each name, so `from a import b` is `a.b`.
+    fn imports(&self, node: Node, src: &str, file_path: &str, project: &Project) -> Vec<ImportRef> {
+        let mut cursor = node.walk();
+        let specifiers: Vec<String> = match node.kind() {
+            "import_statement" => node
+                .children_by_field_name("name", &mut cursor)
+                .filter_map(|name| py_imported_name(name, src))
+                .collect(),
+            "import_from_statement" => {
+                let Some(module) = node.child_by_field_name("module_name") else { return Vec::new() };
+                let module = text(module, src).split_whitespace().collect::<String>();
+                let sep = if module.ends_with('.') { "" } else { "." };
+                let mut names: Vec<String> = node
+                    .children_by_field_name("name", &mut cursor)
+                    .filter_map(|name| py_imported_name(name, src))
+                    .collect();
+                if node.named_children(&mut node.walk()).any(|c| c.kind() == "wildcard_import") {
+                    names.push("*".to_string());
+                }
+                if names.is_empty() {
+                    vec![module]
+                } else {
+                    names.into_iter().map(|name| format!("{module}{sep}{name}")).collect()
+                }
+            }
+            _ => return Vec::new(),
+        };
+        specifiers
+            .into_iter()
+            .map(|specifier| {
+                let resolved = py_resolve(&specifier, file_path, project);
+                ImportRef { specifier, resolved }
+            })
+            .collect()
+    }
+
     fn caught_types(&self, node: Node, src: &str) -> Option<Vec<String>> {
         if !matches!(node.kind(), "except_clause" | "except_group_clause") {
             return None;
@@ -229,6 +266,46 @@ impl Adapter for Python {
         }
         Some((name, bases))
     }
+}
+
+/// The dotted name an `import` or `from ... import` item brings in, without its `as` alias.
+fn py_imported_name(node: Node, src: &str) -> Option<String> {
+    match node.kind() {
+        "dotted_name" => Some(text(node, src).split_whitespace().collect()),
+        "aliased_import" => py_imported_name(node.child_by_field_name("name")?, src),
+        _ => None,
+    }
+}
+
+/// The project file a Python import leads to, or the specifier itself for a package from outside.
+/// Absolute imports start at the source roots of the nearest `pyproject.toml`; relative ones
+/// (`.x`, `..p.y`) at the importing file's package. `a.b.c` also finds `a/b.py` when `c` is a name in it.
+fn py_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
+    let dots = specifier.chars().take_while(|c| *c == '.').count();
+    let parts: Vec<&str> = specifier[dots..].split('.').filter(|p| !p.is_empty() && *p != "*").collect();
+    let bases: Vec<String> = if dots == 0 {
+        project.modules.py.roots_for(file_path).to_vec()
+    } else {
+        let mut dir: Vec<&str> = file_path.split('/').collect();
+        dir.pop(); // the file name
+        for _ in 1..dots {
+            if dir.pop().is_none() {
+                return specifier.to_string(); // above the project
+            }
+        }
+        vec![dir.join("/")]
+    };
+    for base in &bases {
+        for length in (1..=parts.len()).rev() {
+            let module = crate::modules::join(base, &parts[..length].join("/"));
+            for candidate in [format!("{module}.py"), format!("{module}/__init__.py")] {
+                if project.paths.contains(&candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+    specifier.to_string()
 }
 
 /// `a.b.c` for plain identifier/attribute chains, otherwise `None`.
@@ -504,7 +581,7 @@ fn es_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
     {
         // The aliases written in tvlint.yaml win over the ones read from tsconfig.
         vec![format!("{target}{}", &specifier[prefix.len()..])]
-    } else if let Some(candidates) = project.tsconfigs.resolve(specifier, file_path) {
+    } else if let Some(candidates) = project.modules.ts.resolve(specifier, file_path) {
         candidates
     } else {
         return specifier.to_string();
@@ -784,13 +861,17 @@ impl Adapter for Go {
     }
 
     /// Every `import` spec: `"fmt"`, `db "app/db"`, `. "app/db"` and `_ "app/db"`.
-    fn imports(&self, node: Node, src: &str, _file_path: &str, _project: &Project) -> Vec<ImportRef> {
+    /// A path inside one of the project's modules (see `go.mod`) resolves to its project directory.
+    fn imports(&self, node: Node, src: &str, _file_path: &str, project: &Project) -> Vec<ImportRef> {
         if node.kind() != "import_spec" {
             return Vec::new();
         }
         let Some(path) = node.child_by_field_name("path") else { return Vec::new() };
         match self.string_value(path, src) {
-            Some(specifier) => vec![ImportRef { resolved: specifier.clone(), specifier }],
+            Some(specifier) => {
+                let resolved = project.modules.go.resolve(&specifier).unwrap_or_else(|| specifier.clone());
+                vec![ImportRef { specifier, resolved }]
+            }
             None => Vec::new(),
         }
     }

@@ -17,8 +17,8 @@ pub struct Project<'a> {
     pub index: &'a ClassIndex,
     /// Import prefix -> project path, e.g. `@/` -> `src/`.
     pub aliases: &'a BTreeMap<String, String>,
-    /// Aliases from `tsconfig.json` and `jsconfig.json`; the `aliases` of the rule's config win over them.
-    pub tsconfigs: &'a crate::tsconfig::TsConfigs,
+    /// What `tsconfig.json`, `go.mod` and `pyproject.toml` say about where imports lead. The `aliases` of the rule's config win over tsconfig.
+    pub modules: &'a crate::modules::Modules,
     /// Every file in the project, to find which file an import points at.
     pub paths: &'a HashSet<String>,
     /// Every JSON, YAML and TOML file, parsed.
@@ -646,7 +646,7 @@ mod tests {
         let index = ClassIndex::build(std::slice::from_ref(&file));
         let compiled = CompiledRule::new("r", rule).unwrap();
         let docs = BTreeMap::new();
-        let ctx = Project { index: &index, aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths, docs: &docs };
+        let ctx = Project { index: &index, aliases, modules: &crate::modules::Modules::default(), paths, docs: &docs };
         let mut out = Vec::new();
         check_file(&file, &compiled, &ctx, &mut out);
         out.into_iter().map(|v| (v.line, v.message)).collect()
@@ -659,7 +659,7 @@ mod tests {
         let docs: BTreeMap<String, Doc> = parsed.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), Doc::build(f))).collect();
         let compiled = CompiledRule::new("r", rule).unwrap();
         let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-        let ctx = Project { index: &index, aliases: &aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths: &paths, docs: &docs };
+        let ctx = Project { index: &index, aliases: &aliases, modules: &crate::modules::Modules::default(), paths: &paths, docs: &docs };
         let mut out = Vec::new();
         check_file(parsed.iter().find(|f| f.path == target).unwrap(), &compiled, &ctx, &mut out);
         out.into_iter().map(|v| (v.line, v.column, v.message)).collect()
@@ -820,7 +820,7 @@ mod tests {
         let compiled = CompiledRule::new("r", &r).unwrap();
         let index = ClassIndex::default();
         let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-        let ctx = Project { index: &index, aliases: &aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths: &paths, docs: &docs };
+        let ctx = Project { index: &index, aliases: &aliases, modules: &crate::modules::Modules::default(), paths: &paths, docs: &docs };
         let unused = unused_registry_entries(&compiled, files[1..].iter(), &ctx);
         assert_eq!(unused.len(), 1);
         assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call passes it"));
@@ -1186,6 +1186,63 @@ useQuery({ queryKey: [...base, accountID] });\n";
         let src = "<p onclick=\"go()\" STYLE='x'>\n<input disabled data-id=\"7\">\n</p>\n";
         let r = Rule { forbid_property: ["onclick", "style", "disabled"].into_iter().map(String::from).collect(), ..html_rule() };
         assert_eq!(lines("a.html", src, &r), [1, 1, 2]);
+    }
+
+    /// Import messages of `source` with the project's files and `go.mod` modules known.
+    fn imports_in(path: &str, source: &str, files: &[&str], go: &[(&str, &str)], forbid: &[&str]) -> Vec<String> {
+        let file = parse(path, source);
+        let index = ClassIndex::build(std::slice::from_ref(&file));
+        let r = Rule { forbid_import: forbid.iter().map(|s| s.to_string()).collect(), ..empty_rule() };
+        let compiled = CompiledRule::new("r", &r).unwrap();
+        let paths = project(files);
+        let list: Vec<String> = files.iter().map(|f| f.to_string()).collect();
+        let modules = crate::modules::Modules {
+            go: crate::modules::GoModules::for_test(go),
+            py: crate::modules::PythonRoots::load(&BTreeMap::new(), &list),
+            ..Default::default()
+        };
+        let docs = BTreeMap::new();
+        let aliases = BTreeMap::new();
+        let ctx = Project { index: &index, aliases: &aliases, modules: &modules, paths: &paths, docs: &docs };
+        let mut out = Vec::new();
+        check_file(&file, &compiled, &ctx, &mut out);
+        out.into_iter().map(|v| v.message).collect()
+    }
+
+    #[test]
+    fn go_imports_inside_the_module_resolve_to_project_directories() {
+        let src = "package main\n\nimport (\n\t\"fmt\"\n\t\"github.com/acme/app/internal/db\"\n\t\"github.com/lib/pq\"\n)\n";
+        let found = imports_in("cmd/main.go", src, &[], &[("github.com/acme/app", "")], &["internal/db", "internal/db/**", "github.com/lib/**"]);
+        assert_eq!(
+            found,
+            [
+                "importing `github.com/acme/app/internal/db` (internal/db) is forbidden",
+                "importing `github.com/lib/pq` is forbidden",
+            ]
+        );
+    }
+
+    #[test]
+    fn python_imports_resolve_through_source_roots_and_relative_dots() {
+        let files = ["src/app/__init__.py", "src/app/db/__init__.py", "src/app/db/query.py", "src/app/ui/page.py", "src/app/ui/helpers.py"];
+        let src = "import os\nimport app.db.query as q\nfrom app.db import query, connect\nfrom . import helpers\nfrom ..db import *\nfrom sqlalchemy import select\n";
+        let found = imports_in("src/app/ui/page.py", src, &files, &[], &["src/app/db/**", "src/app/db", "sqlalchemy.**"]);
+        assert_eq!(
+            found,
+            [
+                "importing `app.db.query` (src/app/db/query.py) is forbidden",
+                "importing `app.db.query` (src/app/db/query.py) is forbidden",
+                "importing `app.db.connect` (src/app/db/__init__.py) is forbidden",
+                "importing `..db.*` (src/app/db/__init__.py) is forbidden",
+                "importing `sqlalchemy.select` is forbidden",
+            ]
+        );
+    }
+
+    #[test]
+    fn python_patterns_may_use_dotted_module_names() {
+        let found = imports_in("a.py", "import app.db.query\nfrom app.db import x\nimport app.ui\n", &[], &[], &["app.db.**"]);
+        assert_eq!(found.len(), 2, "{found:?}");
     }
 
     fn imports(path: &str, source: &str, forbid: &[&str], except: &[&str]) -> Vec<String> {

@@ -108,7 +108,7 @@ impl Language {
         match key {
             "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
             "forbid_catch" => self == Python,
-            "forbid_import" | "except_import" => matches!(self, JavaScript | TypeScript | Rust | Go | Shell),
+            "forbid_import" | "except_import" => matches!(self, Python | JavaScript | TypeScript | Rust | Go | Shell),
             "forbid_element" | "forbid_property" | "property_value" | "within_property" => {
                 matches!(self, JavaScript | TypeScript)
             }
@@ -132,7 +132,6 @@ impl Language {
             (Language::Shell, "forbid_raise") => "shell has no exceptions; use forbid_call with the command, e.g. `exit` or `set`",
             (Language::Go, "forbid_raise") => "Go has no exceptions; use forbid_call with panic or \"log.Fatal*\"",
             (_, "forbid_catch") => "only Python `except` clauses name the type they catch",
-            (Language::Python, "forbid_import" | "except_import") => "import rules are not supported for Python yet",
             (_, "forbid_import" | "except_import") => "import rules are not supported for this language",
             _ => "JSX elements, object literals and within_property exist only in JavaScript and TypeScript",
         }

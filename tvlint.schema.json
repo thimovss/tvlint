@@ -68,8 +68,8 @@
     "onlyImporting": {
       "description": "Languages whose imports TVLint reads.",
       "anyOf": [
-        { "enum": ["javascript", "typescript", "rust", "go", "shell", "css"] },
-        { "type": "array", "items": { "enum": ["javascript", "typescript", "rust", "go", "shell", "css"] } }
+        { "enum": ["python", "javascript", "typescript", "rust", "go", "shell", "css"] },
+        { "type": "array", "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "shell", "css"] } }
       ]
     },
     "onlyElements": {

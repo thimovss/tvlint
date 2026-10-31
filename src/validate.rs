@@ -21,8 +21,8 @@ const RULE_KEYS: &[(&str, &str)] = &[
     ("forbid_raise", "Python, JS/TS; list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
     ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`; Rust macros end in `!`; Go calls look like `fmt.Println`; in shell a call is a command name such as `curl`; in CSS a function such as `rgb`"),
     ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
-    ("forbid_import", "JS/TS, Rust, Go, shell (`source`/`.`) and CSS (`@import`); module specifiers that must not be imported; relative and aliased imports match by project path"),
-    ("except_import", "JS/TS, Rust, Go, shell and CSS; imports that are fine although they match forbid_import"),
+    ("forbid_import", "Python, JS/TS, Rust, Go, shell (`source`/`.`) and CSS (`@import`); module specifiers that must not be imported; relative, aliased and in-project imports match by project path"),
+    ("except_import", "Python, JS/TS, Rust, Go, shell and CSS; imports that are fine although they match forbid_import"),
     ("forbid_element", "JS/TS and HTML; JSX element or HTML tag names that must not be used, e.g. `button`"),
     ("forbid_property", "JS/TS: object-literal property names that must not appear. HTML: attribute names. CSS: declaration names such as `float`. JSON/YAML/TOML: key paths that must not exist, e.g. `scripts.postinstall`, `jobs.*.permissions`, `**.debug`"),
     ("property_value", "JS/TS and HTML (attributes): `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`. JSON/YAML/TOML: `names` (key paths) plus `forbid_value` and/or `require_value` (globs on the value)"),
@@ -1077,10 +1077,10 @@ scopes:
     fn javascript_checks_are_rejected_for_python() {
         let yaml = ES_RULE.replace("language: typescript", "language: [python, typescript]").replace(
             "    fix: how\n",
-            "    fix: how\n    forbid_import: [x]\n",
+            "    fix: how\n    forbid_element: [x]\n",
         );
         let found = errors(&yaml);
-        assert!(has(&found, "rules.r.forbid_import", "not supported for python"), "{found:?}");
+        assert!(has(&found, "rules.r.forbid_element", "not supported for python"), "{found:?}");
     }
 
     #[test]
