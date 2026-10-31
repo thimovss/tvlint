@@ -1,0 +1,14 @@
+# Only repositories may commit
+# Shows exclude: the rule applies everywhere except the one layer that is allowed to do it.
+
+rules:
+  commit-only-in-repositories:
+    language: python
+    forbid_call: ["*.commit", "*.rollback"]
+    rationale: Transaction boundaries belong in one place. Commits scattered through the code make partial writes hard to reason about.
+    fix: Move the database work into a repository in src/repositories/ and commit there.
+
+scopes:
+  - rules: [commit-only-in-repositories]
+    include: ["src/**"]
+    exclude: ["src/repositories/**", "src/tests/**"]

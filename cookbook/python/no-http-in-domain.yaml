@@ -1,0 +1,13 @@
+# Keep HTTP out of the domain layer
+# Domain code should not know it is served over HTTP.
+
+rules:
+  no-http-in-domain:
+    language: python
+    forbid_raise: [HTTPException]
+    rationale: HTTP status codes are a transport concern. Domain code that raises them cannot be reused from a CLI or a worker.
+    fix: Raise a domain exception and let the API layer translate it into a response.
+
+scopes:
+  - rules: [no-http-in-domain]
+    include: ["src/domain/**"]

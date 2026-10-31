@@ -1,0 +1,22 @@
+# No wall clock in tests
+# A test that reads the real clock depends on when it runs: it breaks at midnight, on
+# month ends, in other timezones and when run slowly. Both spellings of each call are
+# listed because imports are not resolved.
+
+rules:
+  no-wall-clock-in-tests:
+    language: python
+    forbid_call:
+      - datetime.now
+      - datetime.utcnow
+      - datetime.datetime.now
+      - datetime.datetime.utcnow
+      - date.today
+      - datetime.date.today
+      - time.time
+    rationale: Reading the real clock makes a test depend on when it runs, so it can fail at certain times and the failure cannot be reproduced.
+    fix: Use a fixed datetime in the test, or freeze time with a library such as freezegun or time-machine.
+
+scopes:
+  - rules: [no-wall-clock-in-tests]
+    include: ["tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py"]

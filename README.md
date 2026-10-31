@@ -67,6 +67,8 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 
 ## Config
 
+Looking for rules to start from? See the [cookbook](cookbook/python/).
+
 `prlint.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
 
 ```yaml

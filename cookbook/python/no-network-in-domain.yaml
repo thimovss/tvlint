@@ -1,0 +1,12 @@
+# No network calls in domain code
+
+rules:
+  no-network-in-domain:
+    language: python
+    forbid_call: ["requests.*", "httpx.*", "urllib.request.*"]
+    rationale: Domain logic that performs I/O is slow to test and fails for reasons unrelated to the business rule.
+    fix: Call the service from the application layer and pass the result into the domain code.
+
+scopes:
+  - rules: [no-network-in-domain]
+    include: ["src/domain/**"]

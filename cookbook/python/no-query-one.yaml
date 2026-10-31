@@ -1,0 +1,13 @@
+# Do not use `.one()` to load a single row
+# .one() raises NoResultFound, which is not one of your domain exceptions.
+
+rules:
+  no-query-one:
+    language: python
+    forbid_call: ["*.one"]
+    rationale: Query.one() raises NoResultFound or MultipleResultsFound, which bypass your error handling.
+    fix: Use .first() and raise your own NotFound exception when the result is None.
+
+scopes:
+  - rules: [no-query-one]
+    include: ["src/commands/**"]

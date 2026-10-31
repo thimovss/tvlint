@@ -1,0 +1,13 @@
+# Routers must not catch domain exceptions
+# If one global handler turns domain exceptions into responses, routers catching them to build their own response bypass it. subclass_of also covers every class that inherits from AppError.
+
+rules:
+  no-catching-domain-errors-in-routers:
+    language: python
+    forbid_catch: { subclass_of: AppError }
+    rationale: The global handler produces every error response. A router that catches AppError creates a second, inconsistent format.
+    fix: Remove the try/except and let the exception propagate.
+
+scopes:
+  - rules: [no-catching-domain-errors-in-routers]
+    include: ["src/routers/**"]

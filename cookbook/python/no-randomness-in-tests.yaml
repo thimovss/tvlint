@@ -1,0 +1,27 @@
+# No unseeded randomness in tests
+# Random values make a test pass or fail depending on the run. Module-level random
+# functions use a shared, unseeded generator. A seeded random.Random(42) instance is
+# deterministic and stays allowed.
+
+rules:
+  no-randomness-in-tests:
+    language: python
+    forbid_call:
+      - random.random
+      - random.randint
+      - random.randrange
+      - random.choice
+      - random.choices
+      - random.shuffle
+      - random.sample
+      - random.uniform
+      - random.gauss
+      - random.getrandbits
+      - uuid.uuid4
+      - "secrets.*"
+    rationale: Unseeded randomness makes tests flaky, and a failure cannot be reproduced because the input is gone.
+    fix: Use fixed values or a factory with a fixed seed, e.g. rng = random.Random(42) and rng.choice(...).
+
+scopes:
+  - rules: [no-randomness-in-tests]
+    include: ["tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py"]

@@ -1,0 +1,13 @@
+# Read configuration in one place
+
+rules:
+  env-only-in-config:
+    language: python
+    forbid_call: [os.getenv, os.environ.get]
+    rationale: Environment reads scattered through the code make configuration impossible to list, validate or test.
+    fix: Add the setting to src/config.py and import it from there.
+
+scopes:
+  - rules: [env-only-in-config]
+    include: ["src/**"]
+    exclude: ["src/config.py"]
