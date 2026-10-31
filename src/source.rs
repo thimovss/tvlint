@@ -22,7 +22,7 @@ impl SourceFile {
     }
 }
 
-fn language_of(path: &Path) -> Option<Language> {
+pub fn language_of(path: &Path) -> Option<Language> {
     match path.extension()?.to_str()? {
         "py" => Some(Language::Python),
         _ => None,
@@ -76,6 +76,21 @@ pub fn use_index_contents(files: &mut [SourceFile], staged: &BTreeSet<String>, r
         file.tree = tree;
     }
     Ok(())
+}
+
+/// Every file under `root` (any type), relative to it, honouring `.gitignore`.
+pub fn list_all(root: &Path) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for entry in WalkBuilder::new(root).build() {
+        let entry = entry?;
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
+        paths.push(relative.to_string_lossy().replace('\\', "/"));
+    }
+    paths.sort();
+    Ok(paths)
 }
 
 /// Finds and parses every supported source file under `root`, honouring `.gitignore`.

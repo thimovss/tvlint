@@ -1,0 +1,19 @@
+# Test directory files must be named test_*.py or conftest.py
+# Every file under tests/ must be a test module or a conftest. Anything else, such as
+# helper modules, data files and __init__.py, is rejected. With no `language` set the
+# rule applies to all file types, not only Python.
+#
+# Adjust to your project:
+#   - add "__init__.py" to require_filename if your tests are packages
+#   - exclude data directories, e.g. exclude: ["tests/fixtures/**"]
+
+rules:
+  test-pytest-file-names:
+    require_filename: ["test_*.py", conftest.py]
+    rationale: pytest collects test_*.py by default, so a test in a differently named file is silently never run. Stray helper modules also make it unclear where shared test code lives.
+    fix: Rename the file to test_<name>.py. Put shared fixtures in conftest.py, and move non-test code out of the tests directory.
+
+scopes:
+  - rules: [test-pytest-file-names]
+    include: ["tests/**"]
+    exclude: ["tests/utils.py"]

@@ -15,10 +15,11 @@ const TOP_KEYS: &[(&str, &str)] = &[
     ("scopes", "list of entries that say which files each rule runs on"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
-    ("language", "required; the language to parse, currently only `python`"),
+    ("language", "the language the rule applies to, currently only `python`; required with forbid_* checks"),
     ("forbid_raise", "list of exception names that must not be raised"),
     ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`"),
     ("forbid_catch", "`subclass_of: Name` forbids catching Name or any class inheriting from it"),
+    ("require_filename", "list of file name globs; any matched file whose name matches none is a violation"),
     ("rationale", "required; why the rule exists, shown with every violation"),
     ("fix", "required; how to comply, shown with every violation"),
 ];
@@ -113,6 +114,7 @@ fn check_against_project(
         .context("config file has no parent directory")?;
     let files = source::load_all(&root)?;
     let index = ClassIndex::build(&files);
+    let all_paths = source::list_all(&root)?;
     let scopes = config.scopes.iter().map(CompiledScope::new).collect::<Result<Vec<_>>>()?;
 
     let mut summaries = Vec::new();
@@ -120,15 +122,19 @@ fn check_against_project(
         let mut matched: BTreeSet<&str> = BTreeSet::new();
         let mut per_scope = Vec::new();
         for (i, scope) in scopes.iter().enumerate().filter(|(_, s)| s.rules.contains(id)) {
-            let hits: Vec<&str> = files
+            let hits: Vec<&str> = all_paths
                 .iter()
-                .filter(|f| f.language == rule.language && scope.matches(&f.path))
-                .map(|f| f.path.as_str())
+                .filter(|p| rule.language.is_none_or(|lang| source::language_of(Path::new(p)) == Some(lang)))
+                .filter(|p| scope.matches(p))
+                .map(String::as_str)
                 .collect();
             if hits.is_empty() {
                 report.warning(
                     &format!("scopes[{i}]"),
-                    format!("rule `{id}` matches no {} files here, so it has nothing to check", language_name(rule.language)),
+                    format!(
+                        "rule `{id}` matches no {}files here, so it has nothing to check",
+                        rule.language.map_or(String::new(), |l| format!("{} ", l.name()))
+                    ),
                     Some(format!(
                         "include/exclude globs are relative to {}; `*` stays in one directory, `**` crosses directories",
                         root.display()
@@ -165,21 +171,18 @@ fn check_against_project(
         if let Some(catch) = &rule.forbid_catch {
             forbids.push(format!("catching {} or its subclasses", catch.subclass_of));
         }
+        if !rule.require_filename.is_empty() {
+            forbids.push(format!("file names other than {}", rule.require_filename.join(", ")));
+        }
         summaries.push(RuleSummary {
             id: id.clone(),
-            language: language_name(rule.language).to_string(),
+            language: rule.language.map_or("any language", Language::name).to_string(),
             forbids,
             files: matched.len(),
             scopes: per_scope,
         });
     }
     Ok(summaries)
-}
-
-fn language_name(language: Language) -> &'static str {
-    match language {
-        Language::Python => "python",
-    }
 }
 
 fn print_report(name: &str, report: &Report, config: Option<&Config>, summary: &[RuleSummary]) {
@@ -270,14 +273,20 @@ fn validate_rules(rules: &Value, report: &mut Report) -> BTreeSet<String> {
 }
 
 fn validate_rule(path: &str, value: &Value, report: &mut Report) {
-    let Some(rule) = expect_mapping(value, path, "a mapping with `language`, a check, `rationale` and `fix`", report)
+    let Some(rule) = expect_mapping(value, path, "a mapping with a check, `rationale` and `fix` (and `language` for forbid_* checks)", report)
     else {
         return;
     };
     check_keys(rule, path, RULE_KEYS, report);
 
+    let has_code_checks = ["forbid_raise", "forbid_call", "forbid_catch"].iter().any(|k| rule.get(*k).is_some());
     match rule.get("language") {
-        None => report.error(path, "missing required key `language`", Some(format!("add `language: {}`", LANGUAGES[0]))),
+        None if has_code_checks => report.error(
+            path,
+            "missing required key `language`",
+            Some(format!("add `language: {}`; it is required by forbid_raise, forbid_call and forbid_catch", LANGUAGES[0])),
+        ),
+        None => {}
         Some(Value::String(lang)) if LANGUAGES.contains(&lang.as_str()) => {}
         Some(Value::String(lang)) => report.error(
             &format!("{path}.language"),
@@ -308,6 +317,15 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
             }
         }
     }
+    if let Some(value) = rule.get("require_filename") {
+        checks += 1;
+        let name_path = format!("{path}.require_filename");
+        for (i, pattern) in string_list(value, &name_path, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{name_path}[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    }
     if let Some(value) = rule.get("forbid_catch") {
         checks += 1;
         let catch_path = format!("{path}.forbid_catch");
@@ -324,7 +342,7 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
         report.error(
             path,
             "the rule has no checks, so it can never report anything",
-            Some("add at least one of `forbid_raise`, `forbid_call` or `forbid_catch`".into()),
+            Some("add at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`".into()),
         );
     }
 }
@@ -529,6 +547,27 @@ scopes:
     fn rejects_unsupported_language_with_suggestion() {
         let found = errors(&GOOD.replace("language: python", "language: pyhton"));
         assert!(has(&found, "rules.no-http.language", "unsupported language"), "{found:?}");
+    }
+
+    #[test]
+    fn filename_rule_needs_no_language() {
+        let yaml = r#"
+rules:
+  names:
+    require_filename: ["test_*.py", conftest.py]
+    rationale: r
+    fix: f
+scopes:
+  - rules: [names]
+    include: ["tests/**"]
+"#;
+        assert!(errors(yaml).is_empty(), "{:?}", errors(yaml));
+    }
+
+    #[test]
+    fn code_checks_still_need_a_language() {
+        let found = errors(&GOOD.replace("    language: python\n", ""));
+        assert!(has(&found, "rules.no-http", "missing required key `language`"), "{found:?}");
     }
 
     #[test]

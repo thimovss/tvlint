@@ -22,6 +22,7 @@ pub struct CompiledRule<'a> {
     raise: GlobSet,
     call: GlobSet,
     catch_root: Option<&'a str>,
+    filename: GlobSet,
 }
 
 impl<'a> CompiledRule<'a> {
@@ -32,6 +33,7 @@ impl<'a> CompiledRule<'a> {
             raise: compile(&rule.forbid_raise).with_context(|| format!("rule `{id}` forbid_raise"))?,
             call: compile(&rule.forbid_call).with_context(|| format!("rule `{id}` forbid_call"))?,
             catch_root: rule.forbid_catch.as_ref().map(|c| c.subclass_of.as_str()),
+            filename: compile(&rule.require_filename).with_context(|| format!("rule `{id}` require_filename"))?,
         })
     }
 }
@@ -93,6 +95,27 @@ impl ClassIndex {
             }
         }
     }
+}
+
+/// A file whose name matches none of the rule's `require_filename` globs.
+pub fn check_filename(path: &str, rule: &CompiledRule) -> Option<Violation> {
+    if rule.rule.require_filename.is_empty() {
+        return None;
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    if rule.filename.is_match(name) {
+        return None;
+    }
+    Some(Violation {
+        path: path.to_string(),
+        line: 1,
+        column: 1,
+        rule_id: rule.id.to_string(),
+        message: format!(
+            "file name `{name}` is not allowed here; allowed names: {}",
+            rule.rule.require_filename.join(", ")
+        ),
+    })
 }
 
 pub fn check_file(
@@ -260,7 +283,8 @@ mod tests {
 
     fn rule(raise: &[&str], call: &[&str], catch: Option<&str>) -> Rule {
         Rule {
-            language: Language::Python,
+            language: Some(Language::Python),
+            require_filename: Vec::new(),
             forbid_raise: raise.iter().map(|s| s.to_string()).collect(),
             forbid_call: call.iter().map(|s| s.to_string()).collect(),
             forbid_catch: catch.map(|c| ClassSelector { subclass_of: c.into() }),
@@ -299,6 +323,26 @@ mod tests {
 try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, mod.Mid):\n    pass\ntry:\n    pass\nexcept KeyError:\n    pass\n";
         let hits = run(src, &rule(&[], &[], Some("ExampleException")));
         assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), [6, 10]);
+    }
+
+    #[test]
+    fn filename_rule_matches_on_the_base_name_only() {
+        let rule = Rule {
+            language: None,
+            forbid_raise: Vec::new(),
+            forbid_call: Vec::new(),
+            forbid_catch: None,
+            require_filename: vec!["test_*.py".into(), "conftest.py".into()],
+            rationale: String::new(),
+            fix: String::new(),
+        };
+        let compiled = CompiledRule::new("r", &rule).unwrap();
+        assert!(check_filename("tests/test_users.py", &compiled).is_none());
+        assert!(check_filename("tests/unit/conftest.py", &compiled).is_none());
+        let hit = check_filename("tests/helpers.py", &compiled).unwrap();
+        assert!(hit.message.contains("`helpers.py`"));
+        assert!(check_filename("tests/data.json", &compiled).is_some());
+        assert!(check_filename("tests/mytest_x.py", &compiled).is_some());
     }
 
     #[test]

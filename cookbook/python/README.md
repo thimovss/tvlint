@@ -40,6 +40,10 @@ prlint validate -c cookbook/python/no-wall-clock-in-tests.yaml
 - [No wall clock in tests](no-wall-clock-in-tests.yaml)
 - [No unseeded randomness in tests](no-randomness-in-tests.yaml)
 
+### Project layout
+
+- [Test directory files must be named test_*.py or conftest.py](test-pytest-file-names.yaml)
+
 ### Architecture
 
 - [Only repositories may commit](commit-only-in-repositories.yaml)

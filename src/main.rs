@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
-use check::{ClassIndex, CompiledRule, Violation, check_file};
+use check::{ClassIndex, CompiledRule, Violation, check_file, check_filename};
 use config::Config;
 use scope::CompiledScope;
 
@@ -96,7 +96,8 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         }
         for scope in scopes.iter().filter(|s| s.matches(&file.path)) {
             for id in scope.rules {
-                if rules[id.as_str()].rule.language == file.language {
+                let rule = rules[id.as_str()].rule;
+                if rule.has_code_checks() && rule.language == Some(file.language) {
                     jobs.insert((file_idx, id.as_str()));
                 }
             }
@@ -104,14 +105,39 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     }
 
     let mut violations: Vec<Violation> = Vec::new();
-    let mut checked = BTreeSet::new();
+    let mut checked: BTreeSet<&str> = BTreeSet::new();
     for (file_idx, id) in jobs {
         let file = &files[file_idx];
-        checked.insert(file_idx);
+        checked.insert(file.path.as_str());
         if file.has_syntax_errors() {
             eprintln!("prlint: warning: {} has syntax errors, results may be incomplete", file.path);
         }
         check_file(file, &rules[id], &index, &mut violations);
+    }
+
+    // File-name rules look at every file, not only the ones we can parse.
+    let all_paths = source::list_all(&root)?;
+    let mut name_jobs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for path in &all_paths {
+        if staged_paths.as_ref().is_some_and(|paths| !paths.contains(path)) {
+            continue;
+        }
+        for scope in scopes.iter().filter(|s| s.matches(path)) {
+            for id in scope.rules {
+                let rule = rules[id.as_str()].rule;
+                if rule.require_filename.is_empty() {
+                    continue;
+                }
+                if rule.language.is_some_and(|lang| source::language_of(Path::new(path)) != Some(lang)) {
+                    continue;
+                }
+                name_jobs.insert((path.as_str(), id.as_str()));
+            }
+        }
+    }
+    for (path, id) in name_jobs {
+        checked.insert(path);
+        violations.extend(check_filename(path, &rules[id]));
     }
 
     violations.sort_by(|a, b| (&a.path, a.line, a.column, &a.rule_id).cmp(&(&b.path, b.line, b.column, &b.rule_id)));
@@ -138,7 +164,7 @@ fn explain(config_path: &Path, id: &str) -> Result<()> {
         let known: Vec<&str> = config.rules.keys().map(String::as_str).collect();
         bail!("unknown rule `{id}`; known rules: {}", known.join(", "));
     };
-    println!("{id} ({:?})\n", rule.language);
+    println!("{id} ({})\n", rule.language.map_or("any language", config::Language::name));
     println!("Why:  {}", rule.rationale.trim());
     println!("Fix:  {}\n", rule.fix.trim());
     println!("Forbids:");
@@ -150,6 +176,9 @@ fn explain(config_path: &Path, id: &str) -> Result<()> {
     }
     if let Some(catch) = &rule.forbid_catch {
         println!("  catching {} or its subclasses", catch.subclass_of);
+    }
+    if !rule.require_filename.is_empty() {
+        println!("  file names other than {}", rule.require_filename.join(", "));
     }
     println!("\nApplies to:");
     let mut applied = false;
@@ -171,7 +200,7 @@ fn list(config_path: &Path) -> Result<()> {
     let width = config.rules.keys().map(String::len).max().unwrap_or(0);
     for (id, rule) in &config.rules {
         let scopes = config.scopes.iter().filter(|s| s.rules.contains(id)).count();
-        println!("{id:<width$}  {:?}  {scopes} scope(s)", rule.language);
+        println!("{id:<width$}  {}  {scopes} scope(s)", rule.language.map_or("any language", config::Language::name));
     }
     Ok(())
 }

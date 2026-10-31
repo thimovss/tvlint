@@ -90,14 +90,15 @@ scopes:
 
 | Key | Meaning |
 |---|---|
-| `language` | Required. Selects the parser. Only `python` for now. |
+| `language` | Selects the parser, and limits the rule to files of that language. Only `python` for now. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
 | `forbid_raise` | Exception names that may not be raised. Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
 | `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()`. |
 | `forbid_catch` | `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
+| `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
 | `fix` | Required. How to comply. Printed with every violation. |
 
-A rule needs at least one of `forbid_raise`, `forbid_call` or `forbid_catch`. Unknown keys are rejected.
+A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`. Unknown keys are rejected.
 
 ### Scope keys
 
