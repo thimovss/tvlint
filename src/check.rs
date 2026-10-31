@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use tree_sitter::Node;
 
@@ -209,17 +210,24 @@ pub struct ClassIndex {
 
 impl ClassIndex {
     pub fn build(files: &[SourceFile]) -> ClassIndex {
-        let mut index = ClassIndex::default();
-        for file in files {
-            let adapter = adapter::for_language(file.language);
-            if !adapter.indexes_classes() {
-                continue;
-            }
-            visit(file.tree.root_node(), &mut |node| {
-                if let Some((name, bases)) = adapter.class_bases(node, &file.text) {
-                    index.bases.entry(name).or_default().extend(bases);
+        let per_file: Vec<Vec<(String, Vec<String>)>> = files
+            .par_iter()
+            .map(|file| {
+                let adapter = adapter::for_language(file.language);
+                let mut classes = Vec::new();
+                if adapter.indexes_classes() {
+                    visit(file.tree.root_node(), &mut |node| {
+                        if let Some(class) = adapter.class_bases(node, &file.text) {
+                            classes.push(class);
+                        }
+                    });
                 }
-            });
+                classes
+            })
+            .collect();
+        let mut index = ClassIndex::default();
+        for (name, bases) in per_file.into_iter().flatten() {
+            index.bases.entry(name).or_default().extend(bases);
         }
         index
     }

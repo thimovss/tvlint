@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use rayon::prelude::*;
 
 use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename, normalize_file, unused_registry_entries};
 use config::Config;
@@ -162,23 +163,26 @@ fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
     let mut violations: Vec<Violation> = Vec::new();
     let mut checked: BTreeSet<&str> = BTreeSet::new();
     let mut suppressed = 0;
-    for (file_idx, id) in jobs {
+    // Files are independent, so they are checked in parallel; results come back in job order.
+    let jobs: Vec<(usize, &str)> = jobs.into_iter().collect();
+    let results: Vec<(Vec<Violation>, usize)> = jobs
+        .par_iter()
+        .map(|&(file_idx, id)| {
+            let mut found = Vec::new();
+            check_file(&files[file_idx], &rules[id], &ctx, &mut found);
+            let before = found.len();
+            found.retain(|v| !suppressions[file_idx].hides(v.line));
+            let hidden = before - found.len();
+            (found, hidden)
+        })
+        .collect();
+    for (&(file_idx, _), (found, hidden)) in jobs.iter().zip(results) {
         let file = &files[file_idx];
-        checked.insert(file.path.as_str());
-        if file.has_syntax_errors() {
+        if checked.insert(file.path.as_str()) && file.has_syntax_errors() {
             eprintln!("prlint: warning: {} has syntax errors, results may be incomplete", file.path);
         }
-        let before = violations.len();
-        check_file(file, &rules[id], &ctx, &mut violations);
-        let mut hidden = 0;
-        let mut kept = violations.split_off(before);
-        kept.retain(|v| {
-            let hide = suppressions[file_idx].hides(v.line);
-            hidden += usize::from(hide);
-            !hide
-        });
         suppressed += hidden;
-        violations.extend(kept);
+        violations.extend(found);
     }
 
     // Registry entries that nothing uses are reported in the registry file, from every file in scope.

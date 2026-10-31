@@ -4,6 +4,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use tree_sitter::{Parser, Tree};
 
 use crate::config::Language;
@@ -135,24 +136,26 @@ pub fn list_all(root: &Path) -> Result<Vec<String>> {
 }
 
 /// Finds and parses every supported source file under `root`, honouring `.gitignore`.
+/// Files are parsed in parallel, each worker thread with parsers of its own.
 pub fn load_all(root: &Path) -> Result<Vec<SourceFile>> {
-    let mut parsers = Parsers::new()?;
-
-    let mut files = Vec::new();
+    let mut paths = Vec::new();
     for entry in walker(root).build() {
         let entry = entry?;
-        let path = entry.path();
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
+        if entry.file_type().is_some_and(|t| t.is_file()) && Language::from_path(entry.path()).is_some() {
+            paths.push(entry.into_path());
         }
-        if Language::from_path(path).is_none() {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(path) else { continue };
-        let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
-        let Some((language, tree)) = parsers.parse(&relative, &text) else { continue };
-        files.push(SourceFile { path: relative, language, text, tree });
     }
+    let mut files: Vec<SourceFile> = paths
+        .par_iter()
+        .map_init(Parsers::new, |parsers, path| {
+            let parsers = parsers.as_mut().ok()?;
+            let text = std::fs::read_to_string(path).ok()?;
+            let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+            let (language, tree) = parsers.parse(&relative, &text)?;
+            Some(SourceFile { path: relative, language, text, tree })
+        })
+        .flatten()
+        .collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }

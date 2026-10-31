@@ -1,38 +1,26 @@
 # Outstanding questions and action items
 
-Status after commit `e3ae059` (JSON, YAML and TOML support).
+Done items are removed from this list.
 
 ## Needs a decision
 
 1. **Branch.** The repo is on `master`; the main branch is `main`. Commits are local, nothing is pushed. PR, or merge into `main`?
-2. **`schema/prlint.schema.json`.** Untracked, and not created in this work. It looks like a JSON schema for `prlint.yaml`. If it is yours, it is missing the new languages (`json`, `yaml`, `toml`) and keys (`require_property`, `same_keys_as`, `same_placeholders`, `literal_argument`, `forbid_value`, `require_value`). Update it? Commit it?
-3. **`.idea/linter.iml`.** One-line change not made in this work. Commit, ignore or revert?
-4. **Hidden directories.** prlint now reads dot-directories such as `.github/` (needed for workflow rules). This changes behaviour for every project. Acceptable, or should it be an option?
-5. **CLAUDE.md open questions**, still unanswered: open-core vs commercial, shareable rule packs, how much cross-file analysis is worth it.
+2. **`.idea/linter.iml`.** One-line change not made in this work. Commit, ignore or revert?
+3. **CLAUDE.md open questions**, still unanswered: open-core vs commercial, shareable rule packs, how much cross-file analysis is worth it.
 
-## Not verified
+## Performance
 
-6. **Done: `example/` projects.** Re-run after the change: 5 and 47 violations as before. (`example/prlint.yaml` (5 violations expected) and `example/frontend/prlint.yaml` (47 expected) were the ones to re-run.)
-7. **Done: cookbook recipes.** Every new recipe has now been run against a violating fixture and reports what it should; no recipe needed changing. (Earlier only some were run: `no-latest-image-tags`, `kubernetes-containers-have-limits`, `tsconfig-is-strict`, `translation-keys-exist`, the error-codes recipe. The others were only checked for valid structure: `actions-pinned-to-sha`, `workflows-declare-permissions`, `pinned-npm-versions`, `workspace-packages-use-workspace-protocol`, `locale-files-match`, `feature-flags-have-owners`, and the three TOML recipes.)
-8. **Performance.** Every JSON, YAML and TOML file is now parsed, lockfiles included. Not measured against the targets in CLAUDE.md (under 1s for 10k files; under 100ms for changed-files-only).
-9. **Done: tests** in `tests/data_files.rs` (CLI end to end) and `src/data.rs`. Covered now:
-   - hidden-directory walk
-   - the "registry file not found" error in `check`
-   - unused-entry reporting with `--staged` or `PATH` arguments
-   - YAML and TOML suppression end to end
-   - project-level `validate` checks (missing or empty registry)
-   - TOML edge cases (quoted keys in headers, duplicate keys)
+4. **Changed-files-only checks take about 0.65s on a 10k-file project; the target is under 100ms.** A full check of 10k files (mixed Python, TSX, JSON, YAML, 4 rules) now takes about 0.9s on 10 cores (it was 3.0s before parsing, the class index and rule evaluation ran in parallel). A check of one directory is not faster, because prlint still parses every file: class lookups, import resolution and registry files need the whole project. Fix: parse lazily, only the selected files plus what the active rules actually need (Python files only if a rule uses `forbid_catch`, only the referenced registry and reference files), and add the parse cache from CLAUDE.md. The walk itself is still single-threaded.
 
 ## Known limitations
 
-10. **Dotted keys.** Paths are joined with `.`. For `same_keys_as`, `use: path` and "missing key" positions, a key that itself contains a dot (like `a_failed.x`) is ambiguous.
-11. **YAML.** `same_keys_as` compares only the first document. Aliases and merge keys (`<<`) are not resolved. List items show as indexes in messages (`containers.1`).
-12. **Value checks.** They match text only, so `true` and `"true"` are indistinguishable. Lists and mappings are skipped by `forbid_value` and `require_value`.
-13. **Done: README accuracy.** Directives work in plain `.json` too (tested); the text now says so.
-14. **Not built:**
-    - an expiry-date check for feature flags (depends on the clock, so results would vary)
-    - a rule type that runs a command, which would let a rule check README or cookbook sync
-15. **Rust and Python.** Calls inside Rust macro arguments are invisible. A Rust rule cannot separate `#[cfg(test)]` code from other code in the same file. Python has no import rules yet.
+5. **Dotted keys.** Paths are joined with `.`. For `same_keys_as`, `use: path` and "missing key" positions, a key that itself contains a dot (like `a_failed.x`) is ambiguous.
+6. **YAML.** `same_keys_as` compares only the first document. Aliases and merge keys (`<<`) are not resolved. List items show as indexes in messages (`containers.1`).
+7. **Value checks.** They match text only, so `true` and `"true"` are indistinguishable. Lists and mappings are skipped by `forbid_value` and `require_value`.
+8. **Not built:**
+   - an expiry-date check for feature flags (depends on the clock, so results would vary)
+   - a rule type that runs a command, which would let a rule check README or cookbook sync
+9. **Rust and Python.** Calls inside Rust macro arguments are invisible. A Rust rule cannot separate `#[cfg(test)]` code from other code in the same file. Python has no import rules yet.
 
 ## Product brief versus reality
 
@@ -42,15 +30,8 @@ CLAUDE.md still describes a product that does not exist yet. Not built:
 - JSON and SARIF output
 - the GitHub Action
 - the MCP server
-- the incremental parse cache and `rayon` parallelism
+- the incremental parse cache
 - a dry-run mode for new rules
 - a mandatory reason on suppressions (optional today)
 
 Decision needed: update the brief to match what exists (`prlint`, `prlint.yaml`), or move these to a roadmap.
-
-## Suggested order
-
-1. Items 6 and 7: quick, and they confirm nothing regressed.
-2. Items 9 and 13: tests and a doc fix.
-3. Items 1 to 4: decisions that unblock pushing.
-4. Item 8: measure before optimising.
