@@ -65,6 +65,26 @@
         { "type": "array", "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "shell", "css"] } }
       ]
     },
+    "onlyClasses": {
+      "description": "Languages whose classes and functions TVLint reads.",
+      "anyOf": [
+        { "enum": ["python", "javascript", "typescript"] },
+        { "type": "array", "items": { "enum": ["python", "javascript", "typescript"] } }
+      ]
+    },
+    "classFilter": {
+      "description": "Which classes the class checks look at: those that match every key given.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "subclass_of": {
+          "description": "Class name. Classes that inherit from it, directly or not, are selected; the class itself is not. Found by name across the project.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "names": { "description": "Class name glob or list of globs.", "$ref": "#/$defs/stringOrList" }
+      }
+    },
     "onlyImporting": {
       "description": "Languages whose imports TVLint reads.",
       "anyOf": [
@@ -241,6 +261,34 @@
           "type": "integer",
           "minimum": 1
         },
+        "require_call": {
+          "description": "Python, JavaScript, TypeScript, Rust, Go, shell. Call patterns, as in `forbid_call`: one of them must appear in every file in scope, or in every function that `within_function` selects.",
+          "$ref": "#/$defs/stringList"
+        },
+        "require_method": {
+          "description": "Python, JavaScript, TypeScript. Method name globs that every selected class must declare in its own body; inherited methods do not count.",
+          "$ref": "#/$defs/stringList"
+        },
+        "require_field": {
+          "description": "Python, JavaScript, TypeScript. Field name globs that every selected class must declare in its own body: annotated or assigned names (`x: int`, `x = 1`).",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_field": {
+          "description": "Python, JavaScript, TypeScript. Field name globs that no selected class may declare.",
+          "$ref": "#/$defs/stringList"
+        },
+        "in_class": {
+          "description": "Python, JavaScript, TypeScript. Narrows `require_method`, `require_field` and `forbid_field` to the classes that match. Without it they check every class.",
+          "$ref": "#/$defs/classFilter"
+        },
+        "within_function": {
+          "description": "Python, JavaScript, TypeScript. Function name globs. `forbid_call` and `forbid_raise` only count inside these functions, and `require_call` applies to each of them instead of to the file.",
+          "$ref": "#/$defs/stringList"
+        },
+        "except_function": {
+          "description": "Python, JavaScript, TypeScript. Function name globs that `within_function` leaves out, e.g. `_*` for private ones.",
+          "$ref": "#/$defs/stringList"
+        },
         "require_filename": {
           "description": "File name globs, matched against the base name only. Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. The only check that works without `language`.",
           "$ref": "#/$defs/stringList"
@@ -267,12 +315,19 @@
         { "required": ["same_keys_as"] },
         { "required": ["literal_argument"] },
         { "required": ["max_lines"] },
+        { "required": ["require_call"] },
+        { "required": ["require_method"] },
+        { "required": ["require_field"] },
+        { "required": ["forbid_field"] },
         { "required": ["require_filename"] }
       ],
 
       "dependencies": {
         "except_import": ["forbid_import"],
         "same_placeholders": ["same_keys_as"],
+        "except_function": ["within_function"],
+        "in_class": { "anyOf": [{ "required": ["require_method"] }, { "required": ["require_field"] }, { "required": ["forbid_field"] }] },
+        "within_function": { "anyOf": [{ "required": ["forbid_call"] }, { "required": ["forbid_raise"] }, { "required": ["require_call"] }] },
         "within_property": {
           "anyOf": [
             { "required": ["forbid_call"] },
@@ -300,7 +355,14 @@
               { "required": ["same_keys_as"] },
               { "required": ["same_placeholders"] },
               { "required": ["literal_argument"] },
-              { "required": ["max_lines"] }
+              { "required": ["max_lines"] },
+              { "required": ["require_call"] },
+              { "required": ["require_method"] },
+              { "required": ["require_field"] },
+              { "required": ["forbid_field"] },
+              { "required": ["in_class"] },
+              { "required": ["within_function"] },
+              { "required": ["except_function"] }
             ]
           },
           "then": { "required": ["language"] }
@@ -318,6 +380,13 @@
         { "if": { "required": ["same_keys_as"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
         { "if": { "required": ["same_placeholders"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
         { "if": { "required": ["literal_argument"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
+        { "if": { "required": ["require_call"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
+        { "if": { "required": ["require_method"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["require_field"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["forbid_field"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["in_class"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["within_function"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["except_function"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         {
           "description": "property_value reads different keys in data files and in code.",
           "if": {

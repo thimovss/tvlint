@@ -318,3 +318,33 @@ fn the_same_rule_id_may_be_used_in_several_configs() {
     }
     assert_eq!(exit(&p.tvl(&["validate"])), 0);
 }
+
+#[test]
+fn placeholders_fill_from_the_scope_and_a_missing_one_is_an_error() {
+    let config = |include: &str| {
+        format!(
+            "rules:\n  own-commands:\n    language: python\n    forbid_import: [\"src/*/commands/**\"]\n    except_import: [\"src/{{1}}/commands/**\"]\n    rationale: r\n    fix: f\nscopes:\n  - rules: [own-commands]\n    include: [\"{include}\"]\n"
+        )
+    };
+    let project = Project::new(
+        "placeholders",
+        &[
+            ("tvlint.yaml", &config("src/*/subscriptions/*.py")),
+            ("src/assets/commands/rename.py", "def rename(): ...\n"),
+            ("src/contracts/commands/add.py", "def add(): ...\n"),
+            ("src/assets/subscriptions/a.py", "from assets.commands.rename import rename\nfrom contracts.commands.add import add\n"),
+            ("pyproject.toml", "[tool.setuptools.packages.find]\nwhere = [\"src\"]\n"),
+        ],
+    );
+    let out = project.tvl(&["check"]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(text.contains("src/assets/subscriptions/a.py:2:1: error[own-commands]"), "{text}");
+    assert!(!text.contains("a.py:1:"), "{text}");
+
+    // A scope without a wildcard segment has nothing to fill {1} with.
+    project.write("tvlint.yaml", &config("src/assets/subscriptions/a.py"));
+    let out = project.tvl(&["check"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("placeholder {1}"), "{}", String::from_utf8_lossy(&out.stderr));
+}

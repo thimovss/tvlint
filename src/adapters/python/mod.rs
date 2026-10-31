@@ -4,7 +4,7 @@ mod roots;
 
 use tree_sitter::Node;
 
-use super::{Adapter, ImportRef, last_segment, text};
+use super::{Adapter, ClassMembers, ImportRef, Member, last_segment, text};
 use crate::check::Project;
 
 pub use roots::PythonRoots;
@@ -128,8 +128,8 @@ impl Adapter for Python {
         Some(names)
     }
 
-    fn indexes_classes(&self) -> bool {
-        true
+    fn class_family(&self) -> Option<&'static str> {
+        Some("python")
     }
 
     fn class_bases(&self, node: Node, src: &str) -> Option<(String, Vec<String>)> {
@@ -141,12 +141,47 @@ impl Adapter for Python {
         if let Some(supers) = node.child_by_field_name("superclasses") {
             let mut cursor = supers.walk();
             for base in supers.named_children(&mut cursor) {
+                // `Base[T]` is still Base.
+                let base = if base.kind() == "subscript" { base.child_by_field_name("value").unwrap_or(base) } else { base };
                 if let Some(dotted) = dotted_name(base, src) {
                     bases.push(last_segment(&dotted).to_string());
                 }
             }
         }
         Some((name, bases))
+    }
+
+    /// Methods are `def`s in the class body, fields are annotated or assigned names (`x: int`, `x = 1`).
+    fn class_members<'t>(&self, node: Node<'t>, src: &str) -> Option<ClassMembers<'t>> {
+        if node.kind() != "class_definition" {
+            return None;
+        }
+        let mut members = ClassMembers { methods: Vec::new(), fields: Vec::new() };
+        let Some(body) = node.child_by_field_name("body") else { return Some(members) };
+        let mut cursor = body.walk();
+        for statement in body.named_children(&mut cursor) {
+            let statement = match statement.kind() {
+                "decorated_definition" => statement.child_by_field_name("definition").unwrap_or(statement),
+                _ => statement,
+            };
+            match statement.kind() {
+                "function_definition" => members.methods.extend(statement.child_by_field_name("name").map(|n| text(n, src).to_string())),
+                "expression_statement" => {
+                    let Some(assignment) = statement.named_child(0).filter(|n| n.kind() == "assignment") else { continue };
+                    let Some(left) = assignment.child_by_field_name("left").filter(|n| n.kind() == "identifier") else { continue };
+                    members.fields.push(Member { name: text(left, src).to_string(), node: left });
+                }
+                _ => {}
+            }
+        }
+        Some(members)
+    }
+
+    fn function_name(&self, node: Node, src: &str) -> Option<String> {
+        if node.kind() != "function_definition" {
+            return None;
+        }
+        Some(text(node.child_by_field_name("name")?, src).to_string())
     }
 }
 

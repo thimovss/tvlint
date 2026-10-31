@@ -4,9 +4,12 @@ mod classes;
 mod code;
 mod compile;
 mod data_checks;
+mod structure;
 
 pub use classes::ClassIndex;
-pub use code::{check_file, unused_registry_entries, visit};
+#[cfg(test)]
+pub use code::check_file;
+pub use code::{check_file_in_scope, unused_registry_entries, visit};
 pub use compile::{CompiledLiteral, CompiledRule, Literal, normalize_file};
 
 use std::collections::{BTreeMap, HashSet};
@@ -58,3 +61,5 @@ pub fn check_filename(path: &str, rule: &CompiledRule) -> Option<Violation> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod structure_tests;

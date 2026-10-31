@@ -353,3 +353,29 @@ fn an_empty_config_is_only_a_warning() {
     assert!(report.errors.is_empty());
     assert_eq!(report.warnings.len(), 2);
 }
+
+#[test]
+fn accepts_class_and_function_rules() {
+    assert!(rule_errors("    language: python\n    require_method: [apply]\n    forbid_field: [author]\n    in_class: { subclass_of: DomainEvent }\n").is_empty());
+    assert!(rule_errors("    language: [typescript, javascript]\n    require_field: [id]\n    in_class: { names: [\"*Event\"] }\n").is_empty());
+    assert!(rule_errors("    language: python\n    require_call: [apply_event]\n    within_function: [\"*\"]\n    except_function: [\"_*\"]\n").is_empty());
+    assert!(rule_errors("    language: python\n    forbid_call: [x]\n    within_function: [apply]\n").is_empty());
+}
+
+#[test]
+fn reports_class_and_function_rule_mistakes() {
+    let found = rule_errors("    language: python\n    require_method: [apply]\n    in_class: {}\n");
+    assert!(has(&found, "rules.r.in_class", "selects nothing"), "{found:?}");
+    let found = rule_errors("    language: python\n    forbid_call: [x]\n    in_class: { subclass_of: A }\n");
+    assert!(has(&found, "rules.r.in_class", "nothing to apply to"), "{found:?}");
+    let found = rule_errors("    language: python\n    require_call: [x]\n    except_function: [\"_*\"]\n");
+    assert!(has(&found, "rules.r.except_function", "without within_function"), "{found:?}");
+    let found = rule_errors("    language: python\n    require_method: [apply]\n    within_function: [x]\n");
+    assert!(has(&found, "rules.r.within_function", "nothing to narrow"), "{found:?}");
+    let found = rule_errors("    language: rust\n    require_method: [apply]\n");
+    assert!(has(&found, "rules.r.require_method", "not supported for rust"), "{found:?}");
+    let found = rule_errors("    language: go\n    forbid_call: [x]\n    within_function: [f]\n");
+    assert!(has(&found, "rules.r.within_function", "not supported for go"), "{found:?}");
+    let found = rule_errors("    require_call: [x]\n");
+    assert!(has(&found, "rules.r", "missing required key `language`"), "{found:?}");
+}

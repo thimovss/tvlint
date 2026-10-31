@@ -183,3 +183,71 @@ pub(super) fn validate_property_value(value: &Value, path: &str, report: &mut Re
         );
     }
 }
+
+/// The keys about the shape of code: required calls, class members, and function scoping.
+pub(super) fn validate_structure_keys(rule: &Mapping, path: &str, checks: &mut usize, report: &mut Report) {
+    if let Some(value) = rule.get("require_call") {
+        *checks += 1;
+        let call_path = format!("{path}.require_call");
+        for (i, pattern) in string_list(value, &call_path, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{call_path}[{i}]"), format!("invalid pattern `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    }
+    for key in ["require_method", "require_field", "forbid_field", "within_function", "except_function"] {
+        let Some(value) = rule.get(key) else { continue };
+        if key.starts_with("require_") || key == "forbid_field" {
+            *checks += 1;
+        }
+        let list_path = format!("{path}.{key}");
+        for (i, pattern) in string_list(value, &list_path, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{list_path}[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    }
+    let class_checks = ["require_method", "require_field", "forbid_field"].iter().any(|k| rule.get(*k).is_some());
+    if let Some(value) = rule.get("in_class") {
+        let class_path = format!("{path}.in_class");
+        if let Some(map) = expect_mapping(value, &class_path, "a mapping like `{ subclass_of: DomainEvent }`", report) {
+            check_keys(
+                map,
+                &class_path,
+                &[
+                    ("subclass_of", "class name; classes inheriting from it, directly or not (not the class itself)"),
+                    ("names", "class name glob or list of globs"),
+                ],
+                report,
+            );
+            match map.get("subclass_of") {
+                None => {}
+                Some(Value::String(s)) if !s.trim().is_empty() => {}
+                Some(other) => report.error(&format!("{class_path}.subclass_of"), format!("expected a class name, found {}", describe(other)), None),
+            }
+            if let Some(names) = map.get("names") {
+                string_or_list(names, &format!("{class_path}.names"), report);
+            }
+            if map.get("subclass_of").is_none() && map.get("names").is_none() {
+                report.error(&class_path, "in_class selects nothing", Some("give `subclass_of` or `names`, or leave in_class out to check every class".into()));
+            }
+        }
+        if !class_checks {
+            report.error(&class_path, "in_class has nothing to apply to", Some("it narrows require_method, require_field and forbid_field".into()));
+        }
+    }
+    if rule.get("within_function").is_some() && ["forbid_call", "forbid_raise", "require_call"].iter().all(|k| rule.get(*k).is_none()) {
+        report.error(
+            &format!("{path}.within_function"),
+            "within_function has nothing to narrow",
+            Some("it applies to forbid_call, forbid_raise and require_call".into()),
+        );
+    }
+    if rule.get("except_function").is_some() && rule.get("within_function").is_none() {
+        report.error(
+            &format!("{path}.except_function"),
+            "except_function has nothing to except without within_function",
+            Some("add `within_function: [\"*\"]` to start from every function".into()),
+        );
+    }
+}

@@ -80,6 +80,9 @@ impl Language {
                 matches!(self, JavaScript | TypeScript)
             }
             "require_property" | "same_keys_as" | "same_placeholders" => false,
+            "require_method" | "require_field" | "forbid_field" | "in_class" | "within_function" | "except_function" => {
+                matches!(self, Python | JavaScript | TypeScript)
+            }
             _ => true,
         }
     }
@@ -93,6 +96,8 @@ impl Language {
             (Language::Css, _) => "CSS supports forbid_call (functions such as `rgb`), forbid_import (`@import`) and forbid_property (declaration names)",
             (Language::Html, _) => "HTML supports forbid_element (tag names), forbid_property (attribute names) and property_value (attribute values)",
             (_, "require_property" | "same_keys_as" | "same_placeholders") => "these checks read JSON, YAML and TOML files",
+            (_, "require_method" | "require_field" | "forbid_field" | "in_class") => "class checks exist for Python, JavaScript and TypeScript",
+            (_, "within_function" | "except_function") => "function checks exist for Python, JavaScript and TypeScript",
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""
             }

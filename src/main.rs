@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 
-use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename, normalize_file, unused_registry_entries};
+use check::{ClassIndex, CompiledRule, Project, Violation, check_file_in_scope, check_filename, normalize_file, unused_registry_entries};
 use scope::CompiledScope;
 use suppress::Suppressions;
 
@@ -200,7 +200,14 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
             let mut found = Vec::new();
             // Import aliases belong to the config that defines the rule.
             let ctx = Project { aliases: &config.origins[id].aliases, ..ctx };
-            check_file(&files[file_idx], &rules[id], &ctx, &mut found);
+            // `{n}` placeholders in import patterns are filled from the scope that selected the file.
+            let captures = if rules[id].rule.max_placeholder() > 0 {
+                let path = &files[file_idx].path;
+                scopes.iter().filter(|s| s.rules.iter().any(|r| r == id)).find_map(|s| s.captures(path)).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            check_file_in_scope(&files[file_idx], &rules[id], &ctx, &captures, &mut found);
             let before = found.len();
             found.retain(|v| !suppressions[file_idx].hides(v.line));
             let hidden = before - found.len();

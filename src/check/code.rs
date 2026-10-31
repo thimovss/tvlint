@@ -6,8 +6,10 @@ use globset::GlobSet;
 use tree_sitter::Node;
 
 use crate::adapters::{self, Adapter, last_segment};
+use crate::config::fill_placeholders;
 use crate::source::SourceFile;
-use super::compile::relative_to;
+use super::compile::{compile_paths, relative_to};
+use super::structure;
 use super::data_checks::check_data;
 use super::{CompiledLiteral, CompiledRule, Literal, Project, Violation};
 
@@ -26,12 +28,13 @@ pub(super) fn within_property(rule: &CompiledRule, adapter: &dyn Adapter, node: 
     false
 }
 
-pub fn check_file(
-    file: &SourceFile,
-    rule: &CompiledRule,
-    ctx: &Project,
-    out: &mut Vec<Violation>,
-) {
+#[cfg(test)]
+pub fn check_file(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut Vec<Violation>) {
+    check_file_in_scope(file, rule, ctx, &[], out);
+}
+
+/// Like `check_file`, with what the scope's `include` pattern captured, for the `{n}` placeholders in import patterns.
+pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project, captures: &[String], out: &mut Vec<Violation>) {
     if let Some(max) = rule.rule.max_lines {
         let lines = file.text.lines().count();
         if lines > max {
@@ -49,8 +52,17 @@ pub fn check_file(
         return;
     }
     let adapter = adapters::for_language(file.language);
-    let catch_classes = rule.catch_root.map(|root| (root, ctx.index.subclasses_of(root)));
+    let catch_classes = rule.catch_root.map(|root| (root, ctx.index.subclasses_of("python", root)));
     let src = file.text.as_str();
+    // Import patterns with placeholders are compiled for this file's captures.
+    let filled = rule.templated.then(|| {
+        let fill = |patterns: &[String]| compile_paths(&patterns.iter().map(|p| fill_placeholders(p, captures)).collect::<Vec<_>>()).unwrap_or_default();
+        (fill(&rule.rule.forbid_import), fill(&rule.rule.except_import))
+    });
+    let (import_set, except_set) = filled.as_ref().map_or((&rule.import, &rule.except_import), |(forbid, except)| (forbid, except));
+    let class_scope = structure::class_scope(rule, adapter, ctx);
+    let file_wide_call = !rule.require_call.is_empty() && rule.within_function.is_empty();
+    let mut called = false;
     let mut report = |node: Node, message: String| {
         let pos = node.start_position();
         out.push(Violation {
@@ -63,10 +75,16 @@ pub fn check_file(
     };
 
     visit(file.tree.root_node(), &mut |node| {
+        structure::check_class(rule, adapter, node, src, class_scope.as_ref(), &mut report);
+        structure::check_function(rule, adapter, node, src, &mut report);
+        if file_wide_call && !called {
+            called = adapter.call_name(node, src).is_some_and(|callee| rule.require_call.is_match(&callee));
+        }
         if !rule.raise.is_empty()
             && let Some(name) = adapter.raised_name(node, src)
             && (rule.raise.is_match(&name) || rule.raise.is_match(last_segment(&name)))
             && within_property(rule, adapter, node, src)
+            && structure::within_function(rule, adapter, node, src)
         {
             report(node, format!("raising `{name}` is forbidden"));
         }
@@ -74,17 +92,18 @@ pub fn check_file(
             && let Some(name) = adapter.call_name(node, src)
             && rule.call.is_match(&name)
             && within_property(rule, adapter, node, src)
+            && structure::within_function(rule, adapter, node, src)
         {
             report(node, format!("calling `{name}` is forbidden"));
         }
-        if !rule.import.is_empty() {
+        if !import_set.is_empty() {
             // Rust writes paths with `::`; matching treats them as `/` like every other path.
             let key = |s: &str| s.replace("::", "/");
             for import in adapter.imports(node, src, &file.path, ctx) {
                 // A package name stays as written; a project path is relative to the rule's config.
                 let resolved = if import.resolved == import.specifier { key(&import.resolved) } else { relative_to(&rule.base, &key(&import.resolved)) };
                 let hits = |set: &GlobSet| set.is_match(key(&import.specifier)) || set.is_match(&resolved);
-                if hits(&rule.import) && !hits(&rule.except_import) {
+                if hits(import_set) && !hits(except_set) {
                     let target = if import.resolved == import.specifier {
                         String::new()
                     } else {
@@ -139,6 +158,15 @@ pub fn check_file(
         }
     });
 
+    if file_wide_call && !called {
+        out.push(Violation {
+            path: file.path.clone(),
+            line: 1,
+            column: 1,
+            rule_id: rule.id.to_string(),
+            message: format!("the file never calls {}", rule.rule.require_call.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")),
+        });
+    }
     if let Some(literal) = &rule.literal {
         let entries = literal.entries(ctx);
         for found in literal_arguments(file, literal) {

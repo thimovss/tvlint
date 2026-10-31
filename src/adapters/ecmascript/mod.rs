@@ -4,7 +4,7 @@ mod tsconfig;
 
 use tree_sitter::Node;
 
-use super::{Adapter, ImportRef, Property, first_named_child, relative_path, text};
+use super::{Adapter, ClassMembers, ImportRef, Member, Property, first_named_child, last_segment, relative_path, text};
 use crate::check::Project;
 
 pub use tsconfig::TsConfigs;
@@ -91,6 +91,79 @@ impl Adapter for EcmaScript {
 
     fn string_value(&self, node: Node, src: &str) -> Option<String> {
         Self::string_value(node, src)
+    }
+
+    fn class_family(&self) -> Option<&'static str> {
+        Some("ecmascript")
+    }
+
+    /// `class A extends B`; in TypeScript the base sits in an `extends` clause and may carry type arguments.
+    fn class_bases(&self, node: Node, src: &str) -> Option<(String, Vec<String>)> {
+        if !matches!(node.kind(), "class_declaration" | "abstract_class_declaration") {
+            return None;
+        }
+        let name = text(node.child_by_field_name("name")?, src).to_string();
+        let mut bases = Vec::new();
+        let mut cursor = node.walk();
+        for heritage in node.named_children(&mut cursor).filter(|c| c.kind() == "class_heritage") {
+            let mut inner = heritage.walk();
+            for child in heritage.named_children(&mut inner) {
+                let base = match child.kind() {
+                    "extends_clause" => child.child_by_field_name("value"),
+                    "implements_clause" => None,
+                    _ => Some(child),
+                };
+                if let Some(dotted) = base.and_then(|b| es_dotted_name(b, src)) {
+                    bases.push(last_segment(&dotted).to_string());
+                }
+            }
+        }
+        Some((name, bases))
+    }
+
+    /// Methods (including `constructor`) and fields declared in the class body.
+    fn class_members<'t>(&self, node: Node<'t>, src: &str) -> Option<ClassMembers<'t>> {
+        if !matches!(node.kind(), "class_declaration" | "abstract_class_declaration") {
+            return None;
+        }
+        let mut members = ClassMembers { methods: Vec::new(), fields: Vec::new() };
+        let Some(body) = node.child_by_field_name("body") else { return Some(members) };
+        let mut cursor = body.walk();
+        for member in body.named_children(&mut cursor) {
+            match member.kind() {
+                "method_definition" | "abstract_method_signature" => {
+                    members.methods.extend(member.child_by_field_name("name").and_then(|n| Self::key_name(n, src)));
+                }
+                // `x: T` and `x = 1` in TypeScript; plain `x = 1` is a `field_definition` in JavaScript.
+                "public_field_definition" | "field_definition" => {
+                    let key = member.child_by_field_name("name").or_else(|| member.child_by_field_name("property"));
+                    if let Some(key) = key
+                        && let Some(name) = Self::key_name(key, src)
+                    {
+                        members.fields.push(Member { name, node: key });
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some(members)
+    }
+
+    /// Function declarations, methods, and `const f = () => ...` (named after the variable).
+    fn function_name(&self, node: Node, src: &str) -> Option<String> {
+        match node.kind() {
+            "function_declaration" | "generator_function_declaration" | "method_definition" => {
+                Self::key_name(node.child_by_field_name("name")?, src)
+            }
+            "variable_declarator" => {
+                let value = node.child_by_field_name("value")?;
+                if !matches!(value.kind(), "arrow_function" | "function_expression" | "function") {
+                    return None;
+                }
+                Some(text(node.child_by_field_name("name")?, src).to_string())
+            }
+            _ => None,
+        }
     }
 
     fn array_elements<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {

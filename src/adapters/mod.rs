@@ -39,6 +39,18 @@ pub struct Property<'t> {
     pub value: Option<Node<'t>>,
 }
 
+/// A class member that has a name and a place in the file: a field, for example.
+pub struct Member<'t> {
+    pub name: String,
+    pub node: Node<'t>,
+}
+
+/// What a class body declares directly (not what it inherits): method names and fields.
+pub struct ClassMembers<'t> {
+    pub methods: Vec<String>,
+    pub fields: Vec<Member<'t>>,
+}
+
 pub trait Adapter: Sync {
     /// If `node` raises/throws an exception, the name of what is raised.
     fn raised_name(&self, node: Node, src: &str) -> Option<String>;
@@ -91,13 +103,24 @@ pub trait Adapter: Sync {
         None
     }
 
-    /// Whether this language contributes to the class hierarchy used by `forbid_catch`.
-    fn indexes_classes(&self) -> bool {
-        false
+    /// The class hierarchy this language's classes belong to. Languages that share a family (JavaScript and
+    /// TypeScript) can extend each other's classes; others cannot, so a name in one is never a class in another.
+    fn class_family(&self) -> Option<&'static str> {
+        None
     }
 
     /// If `node` defines a class, its name and the simple names of its base classes.
     fn class_bases(&self, _node: Node, _src: &str) -> Option<(String, Vec<String>)> {
+        None
+    }
+
+    /// If `node` defines a class, the methods and fields its body declares.
+    fn class_members<'t>(&self, _node: Node<'t>, _src: &str) -> Option<ClassMembers<'t>> {
+        None
+    }
+
+    /// If `node` defines a function or method, its name. Anonymous functions have none.
+    fn function_name(&self, _node: Node, _src: &str) -> Option<String> {
         None
     }
 }

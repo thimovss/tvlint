@@ -278,6 +278,68 @@ rules:
 - `report_unused` reports each entry that no call in the rule's scope passes, in the registry file, at the entry. With `--staged` or `PATH` arguments the usage is still collected from the whole scope, and the entries are reported only if the registry file is selected.
 - The registry file must exist and be JSON, YAML or TOML (`validate` checks, and warns when `path` selects nothing).
 
+## Classes and functions
+
+Some rules are about what a class declares or what a function does, not about what a file imports. Python, JavaScript and TypeScript can express them; the rule reads the same in each.
+
+```yaml
+rules:
+  events-declare-apply-and-describe:
+    language: python
+    require_method: [apply, describe]      # a glob: "{apply,create}" accepts either
+    forbid_field: [author, account_id]     # envelope data does not belong on the event
+    in_class: { subclass_of: DomainEvent } # DomainEvent[Agg] counts; DomainEvent itself does not
+    rationale: Events are replayed forever and shown in the history list.
+    fix: Declare apply() and describe() on the event, and keep envelope data on the Event row.
+
+  commands-emit-events:
+    language: python
+    require_call: [apply_event, "*.apply_event", create_aggregate]
+    within_function: ["*"]                 # every function in scope ...
+    except_function: ["_*"]                # ... except the private ones
+    rationale: A command changes data by emitting an event.
+    fix: End the command with apply_event or create_aggregate.
+
+  no-clock-in-apply:
+    language: python
+    forbid_call: ["date.today", "datetime.now"]
+    within_function: [apply]               # only hits inside apply() count
+    rationale: apply() replays old events and must give the same result every time.
+    fix: Read the clock in the command and put the value on the event.
+```
+
+- **Classes** are found by name across the project, like `forbid_catch`. `subclass_of` follows inheritance through the project's own classes, and Python and TypeScript keep separate hierarchies (JavaScript and TypeScript share one). A base written with type arguments (`Base[T]`, `Base<T>`) is still `Base`.
+- **Members are what the class body declares itself.** A method inherited from a base class does not satisfy `require_method`, so a base class that defines `apply` does not hide a subclass that forgot to.
+- **Fields** are annotated or assigned names in the class body (`x: int`, `x = 1`). Instance attributes set in `__init__` are not fields.
+- **Functions** are `def`s and methods, and in JavaScript and TypeScript also `const f = () => ...`. Anonymous functions are not named, so a hit inside one belongs to the function around it.
+- `require_call` counts calls anywhere in the function body, nested blocks and nested functions included. It does not follow calls into other functions.
+- A class is reported on its `class` line and a function on its `def` line, so `tvlint-ignore-next-line` goes above that line.
+
+## Placeholders in import patterns
+
+`forbid_import` and `except_import` may use `{1}`, `{2}`, ... for what the wildcard segments of the scope's `include` pattern matched, in order. This lets one rule say "a package may import itself" instead of one scope for every package:
+
+```yaml
+rules:
+  subscriptions-use-their-own-commands:
+    language: python
+    forbid_import: ["src/*/commands/**"]
+    except_import: ["src/{1}/commands/**"]    # {1} is the package in the include pattern
+    rationale: A subscription lives with the aggregate that reacts to the event.
+    fix: Move it to the package of the aggregate it acts on.
+
+scopes:
+  - rules: [subscriptions-use-their-own-commands]
+    include: ["src/*/subscriptions/*.py"]     # the first * fills {1}
+```
+
+For `src/assets/subscriptions/media_links.py`, `{1}` is `assets`, so importing `src/assets/commands/**` is fine and `src/contracts/commands/**` is reported.
+
+- Each segment of the `include` pattern that has a `*`, `?`, `[..]` or `{..}` in it fills one placeholder, with the whole path segment it matched (`*.py` captures the file name, extension included). `**` captures nothing.
+- A scope with several `include` patterns uses the first one that matches the file. If a rule is in several scopes, the first scope that selects the file counts.
+- A rule that uses `{2}` in a scope whose `include` has only one wildcard segment is an error when the config loads.
+- Only whole numbers in braces are placeholders, so `{a,b}` alternation still works.
+
 ## Config
 
 Looking for rules to start from? See the [cookbook](cookbook/).
@@ -308,7 +370,7 @@ scopes:
 | `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. In Rust, functions are written with `::` (`std::fs::read`, `Vec::new`), methods with `.` (`*.unwrap` matches `s.parse::<i32>().unwrap()`), and macros with their `!` (`println!`); calls inside a macro's arguments are not seen. Imports and aliases are not resolved. |
 | `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
 | `forbid_import` | Python, JavaScript, TypeScript, Rust, Go, shell and CSS. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`; in Rust `use` and `extern crate`, where `use a::{b, c}` counts as `a::b` and `a::c`, and `self::` and `super::` are resolved to `crate::` paths). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). Rust patterns are written with `::` (`sqlx::**`, `crate::db::**`). |
-| `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. |
+| `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. Both take [placeholders](#placeholders-in-import-patterns) such as `{1}`. |
 | `forbid_element` | JavaScript, TypeScript and HTML. JSX element or HTML tag names that may not be used, e.g. `[button, textarea]`. JSX is matched as written, so `button` does not match `Button`; HTML tag and attribute names are lowercased first. |
 | `forbid_property` | JavaScript and TypeScript: object-literal property names that may not appear (`{ onError: ... }`). HTML: attribute names such as `onclick` or `style`. JSX attributes such as `<img onError={...}>` are not properties. JSON, YAML and TOML: key paths that may not exist, e.g. `scripts.postinstall` ([key paths](#data-files)). |
 | `property_value` | JavaScript and TypeScript: constraints on the value of object-literal properties: `names` (required), then `forbid_literal: true` (the value may not be a string literal) and/or `array_starts_with: accountID` (an array-literal value must start with that element; other values are not checked). `in_call: toast.add` limits it to objects passed directly to that call. JSON, YAML and TOML: `names` are key paths, with `forbid_value` and/or `require_value` (globs, see [Data files](#data-files)). |
@@ -317,12 +379,19 @@ scopes:
 | `same_placeholders` | JSON, YAML and TOML. `true` also requires each shared message to use the same `{{name}}` / `{name}` placeholders as the reference. Needs `same_keys_as`. |
 | `literal_argument` | Python, JavaScript, TypeScript and Rust. String literals passed to calls must be listed in a data file, see [Code that must match a data file](#code-that-must-match-a-data-file). |
 | `within_property` | JavaScript and TypeScript. Narrows `forbid_call`, `forbid_raise` and `forbid_element` to hits that sit inside an object-literal property with one of these names, e.g. `onError`. |
+| `require_call` | Python, JavaScript, TypeScript, Rust, Go and shell. Call patterns, written as in `forbid_call`: at least one must be called in each file in scope, or, with `within_function`, in each function it selects. A file without one is reported on line 1, a function on its `def` line. See [Classes and functions](#classes-and-functions). |
+| `require_method` | Python, JavaScript and TypeScript. Method name globs that every selected class must declare in its own body. Inherited methods do not count. |
+| `require_field` | Python, JavaScript and TypeScript. Field name globs that every selected class must declare in its own body: annotated or assigned names such as `x: int` or `x = 1` (a TypeScript `x: T` or a class field `x = 1`). |
+| `forbid_field` | Python, JavaScript and TypeScript. Field name globs that no selected class may declare. Reported at the field. |
+| `in_class` | Python, JavaScript and TypeScript. Which classes `require_method`, `require_field` and `forbid_field` check: `subclass_of: Name` (inheriting from it, directly or not; the class `Name` itself is left out) and/or `names: [globs]`. Without it, every class. |
+| `within_function` | Python, JavaScript and TypeScript. Function name globs. `forbid_call` and `forbid_raise` only count inside such a function (nested functions included), and `require_call` is checked per function instead of per file. |
+| `except_function` | Python, JavaScript and TypeScript. Function name globs that `within_function` leaves out, e.g. `_*`. Needs `within_function`. |
 | `max_lines` | Any language. The most lines a file may have (a positive whole number). A longer file is reported once, on the first line over the limit, with the file's total. `tvlint-ignore-file` skips it. |
 | `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
 | `fix` | Required. How to comply. Printed with every violation. |
 
-A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`. Unknown keys are rejected.
+A rule needs at least one check, such as `forbid_raise`, `forbid_call`, `require_call`, `require_method` or `require_filename`. Unknown keys are rejected.
 
 ### Top-level keys
 

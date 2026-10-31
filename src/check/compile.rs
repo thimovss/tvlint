@@ -23,6 +23,15 @@ pub struct CompiledRule<'a> {
     pub(super) import: GlobSet,
     pub(super) except_import: GlobSet,
     pub(super) element: GlobSet,
+    /// `forbid_import` or `except_import` has `{n}` placeholders, so they are compiled per file.
+    pub(super) templated: bool,
+    pub(super) require_call: GlobSet,
+    pub(super) within_function: GlobSet,
+    pub(super) except_function: GlobSet,
+    pub(super) require_method: Vec<NamedGlob>,
+    pub(super) require_field: Vec<NamedGlob>,
+    pub(super) forbid_field: GlobSet,
+    pub(super) class_filter: Option<CompiledClassFilter<'a>>,
     pub(super) property: HashSet<&'a str>,
     pub(super) within: HashSet<&'a str>,
     pub(super) property_value: Option<CompiledPropertyValue<'a>>,
@@ -32,6 +41,25 @@ pub struct CompiledRule<'a> {
     pub(super) require_property: Vec<RequiredProperty>,
     pub(super) reference: Option<String>,
     pub literal: Option<CompiledLiteral>,
+}
+
+/// A name glob that remembers how it was written, for messages.
+pub(super) struct NamedGlob {
+    pub(super) text: String,
+    pub(super) matcher: GlobMatcher,
+}
+
+pub(super) struct CompiledClassFilter<'a> {
+    pub(super) subclass_of: Option<&'a str>,
+    pub(super) names: GlobSet,
+    pub(super) has_names: bool,
+}
+
+fn named_globs(patterns: &[String]) -> Result<Vec<NamedGlob>> {
+    patterns
+        .iter()
+        .map(|text| Ok(NamedGlob { text: text.clone(), matcher: Glob::new(text)?.compile_matcher() }))
+        .collect()
 }
 
 pub(super) struct CompiledDataValue {
@@ -148,6 +176,25 @@ impl<'a> CompiledRule<'a> {
             import: compile_paths(&rule.forbid_import).with_context(|| format!("rule `{id}` forbid_import"))?,
             except_import: compile_paths(&rule.except_import).with_context(|| format!("rule `{id}` except_import"))?,
             element: compile(&rule.forbid_element).with_context(|| format!("rule `{id}` forbid_element"))?,
+            templated: rule.max_placeholder() > 0,
+            require_call: compile(&rule.require_call).with_context(|| format!("rule `{id}` require_call"))?,
+            within_function: compile(&rule.within_function).with_context(|| format!("rule `{id}` within_function"))?,
+            except_function: compile(&rule.except_function).with_context(|| format!("rule `{id}` except_function"))?,
+            require_method: named_globs(&rule.require_method).with_context(|| format!("rule `{id}` require_method"))?,
+            require_field: named_globs(&rule.require_field).with_context(|| format!("rule `{id}` require_field"))?,
+            forbid_field: compile(&rule.forbid_field).with_context(|| format!("rule `{id}` forbid_field"))?,
+            class_filter: rule
+                .in_class
+                .as_ref()
+                .map(|filter| -> Result<CompiledClassFilter> {
+                    Ok(CompiledClassFilter {
+                        subclass_of: filter.subclass_of.as_deref(),
+                        names: compile(&filter.names)?,
+                        has_names: !filter.names.is_empty(),
+                    })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` in_class"))?,
             property: rule.forbid_property.iter().map(String::as_str).collect(),
             within: rule.within_property.iter().map(String::as_str).collect(),
             property_value: rule

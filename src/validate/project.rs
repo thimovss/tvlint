@@ -13,6 +13,11 @@ use crate::source;
 
 use super::report::{Report, RuleSummary};
 
+/// The class hierarchy a language's classes belong to; the same family names the adapters use.
+fn class_family(language: crate::config::Language) -> Option<&'static str> {
+    crate::adapters::for_language(language).class_family()
+}
+
 /// Looks at the project on disk: which files each rule really runs on, and classes it names.
 pub(super) fn check_against_project(
     config: &Config,
@@ -97,13 +102,24 @@ pub(super) fn check_against_project(
             );
         }
         if let Some(catch) = &rule.forbid_catch
-            && !index.defines(&catch.subclass_of)
+            && !index.defines("python", &catch.subclass_of)
         {
             report.warning(
                 &format!("rules.{id}.forbid_catch.subclass_of"),
                 format!("no class named `{}` is defined in the project", catch.subclass_of),
                 Some("the rule will only match `except` clauses naming it directly; check the spelling".into()),
             );
+        }
+
+        if let Some(base) = rule.in_class.as_ref().and_then(|c| c.subclass_of.as_deref()) {
+            let families: Vec<&str> = rule.language.iter().filter_map(|l| class_family(*l)).collect();
+            if !families.is_empty() && !families.iter().any(|family| index.defines(family, base)) {
+                report.warning(
+                    &format!("rules.{id}.in_class.subclass_of"),
+                    format!("no class named `{base}` is defined in the project, so no class is selected"),
+                    Some("check the spelling; classes are found by name across the project".into()),
+                );
+            }
         }
 
         let forbids = rule.describe_checks();

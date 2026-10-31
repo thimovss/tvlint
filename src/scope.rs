@@ -1,12 +1,14 @@
 use anyhow::{Context, Result};
 use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 
-use crate::config::Scope;
+use crate::config::{CapturePattern, Scope};
 
 pub struct CompiledScope<'a> {
     pub rules: &'a [String],
     include: GlobSet,
     exclude: GlobSet,
+    /// The same `include` patterns, able to say what their wildcard segments matched.
+    captures: Vec<CapturePattern>,
 }
 
 impl<'a> CompiledScope<'a> {
@@ -15,7 +17,16 @@ impl<'a> CompiledScope<'a> {
             rules: &scope.rules,
             include: path_globs(&scope.include)?,
             exclude: path_globs(&scope.exclude)?,
+            captures: scope.include.iter().map(|pattern| CapturePattern::new(pattern)).collect::<Result<_>>()?,
         })
+    }
+
+    /// What the wildcard segments of the first `include` pattern that matches `path` matched, in order.
+    pub fn captures(&self, path: &str) -> Option<Vec<String>> {
+        if !self.matches(path) {
+            return None;
+        }
+        self.captures.iter().find_map(|pattern| pattern.captures(path))
     }
 
     pub fn matches(&self, path: &str) -> bool {

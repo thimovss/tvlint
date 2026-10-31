@@ -1,12 +1,15 @@
 //! The config file: rules, the scopes that select their files, and nested configs.
 
+mod captures;
 mod language;
 mod rule;
+
+pub use captures::{CapturePattern, fill as fill_placeholders};
 
 pub use language::Language;
 pub use rule::{Rule, Use};
 #[cfg(test)]
-pub use rule::{ClassSelector, LiteralArgument, PropertyValue, Registry};
+pub use rule::{ClassFilter, ClassSelector, LiteralArgument, PropertyValue, Registry};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -140,7 +143,7 @@ impl Config {
                 bail!("rule id `{id}` {problem}");
             }
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
-                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, max_lines or require_filename)");
+                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, max_lines, require_call, require_method, require_field, forbid_field or require_filename)");
             }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
@@ -179,6 +182,21 @@ impl Config {
                     }
                 }
             }
+            let class_checks = !rule.require_method.is_empty() || !rule.require_field.is_empty() || !rule.forbid_field.is_empty();
+            if let Some(filter) = &rule.in_class {
+                if !class_checks {
+                    bail!("rule `{id}`: in_class needs require_method, require_field or forbid_field");
+                }
+                if filter.subclass_of.is_none() && filter.names.is_empty() {
+                    bail!("rule `{id}`: in_class needs subclass_of or names (leave it out to check every class)");
+                }
+            }
+            if !rule.within_function.is_empty() && rule.forbid_call.is_empty() && rule.forbid_raise.is_empty() && rule.require_call.is_empty() {
+                bail!("rule `{id}`: within_function needs forbid_call, forbid_raise or require_call");
+            }
+            if !rule.except_function.is_empty() && rule.within_function.is_empty() {
+                bail!("rule `{id}`: except_function needs within_function (use `within_function: [\"*\"]` for every function)");
+            }
             if rule.same_placeholders && rule.same_keys_as.is_none() {
                 bail!("rule `{id}`: same_placeholders needs same_keys_as");
             }
@@ -190,8 +208,13 @@ impl Config {
         }
         for scope in &self.scopes {
             for id in &scope.rules {
-                if !self.rules.contains_key(id) {
-                    bail!("scope references unknown rule `{id}`");
+                let Some(rule) = self.rules.get(id) else { bail!("scope references unknown rule `{id}`") };
+                let needed = rule.max_placeholder();
+                for include in scope.include.iter().filter(|_| needed > 0) {
+                    let wildcards = CapturePattern::new(include)?.wildcards();
+                    if wildcards < needed {
+                        bail!("rule `{id}` uses the placeholder {{{needed}}} in its import patterns, but the scope include `{include}` has only {wildcards} wildcard segment(s) to capture; each `*` segment of an include fills one placeholder, in order");
+                    }
                 }
             }
         }

@@ -22,26 +22,7 @@ fn rule(language: Language, raise: &[&str], call: &[&str], catch: Option<&str>) 
 }
 
 fn empty_rule() -> Rule {
-    Rule {
-        language: Vec::new(),
-        forbid_raise: Vec::new(),
-        forbid_call: Vec::new(),
-        forbid_catch: None,
-        forbid_import: Vec::new(),
-        except_import: Vec::new(),
-        forbid_element: Vec::new(),
-        forbid_property: Vec::new(),
-        property_value: None,
-        within_property: Vec::new(),
-        require_property: Vec::new(),
-        same_keys_as: None,
-        same_placeholders: false,
-        literal_argument: None,
-        require_filename: Vec::new(),
-        max_lines: None,
-        rationale: String::new(),
-        fix: String::new(),
-    }
+    Rule::default()
 }
 
 /// Lines (1-based) of every violation of `rule` in `source`, parsed as the file `path`.
@@ -273,7 +254,7 @@ fn parses_pep695_class_syntax() {
     let file = parse("t.py", "class DomainEvent[T](BaseModel, ABC):\n    pass\n");
     assert!(!file.has_syntax_errors());
     let index = ClassIndex::build(std::slice::from_ref(&file));
-    assert!(index.subclasses_of("BaseModel").contains("DomainEvent"));
+    assert!(index.subclasses_of("python", "BaseModel").contains("DomainEvent"));
 }
 
 // ---- JavaScript and TypeScript

@@ -35,7 +35,7 @@ pub(super) fn one_or_many<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
     })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     /// Which files the rule applies to. Required for code checks; empty means every
@@ -76,6 +76,28 @@ pub struct Rule {
     pub same_placeholders: bool,
     /// String literals passed to calls must be listed in a data file.
     pub literal_argument: Option<LiteralArgument>,
+    /// Calls that must appear: at least one of these in each file, or in each function that `within_function`
+    /// selects.
+    #[serde(default)]
+    pub require_call: Vec<String>,
+    /// Methods that every selected class must declare itself.
+    #[serde(default)]
+    pub require_method: Vec<String>,
+    /// Fields (annotated or assigned names in the class body) that every selected class must declare itself.
+    #[serde(default)]
+    pub require_field: Vec<String>,
+    /// Fields that no selected class may declare.
+    #[serde(default)]
+    pub forbid_field: Vec<String>,
+    /// Which classes `require_method`, `require_field` and `forbid_field` look at. Default: every class.
+    pub in_class: Option<ClassFilter>,
+    /// Only count `forbid_call` and `forbid_raise` hits inside a function with one of these names, and
+    /// make `require_call` apply to each of those functions instead of to the file.
+    #[serde(default)]
+    pub within_function: Vec<String>,
+    /// Functions that `within_function` leaves out, e.g. `_*` for private ones.
+    #[serde(default)]
+    pub except_function: Vec<String>,
     /// Every matched file's name must match one of these globs.
     #[serde(default)]
     pub require_filename: Vec<String>,
@@ -152,6 +174,17 @@ pub struct ClassSelector {
     pub subclass_of: String,
 }
 
+/// Which classes a class check looks at: the ones that match every key given.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClassFilter {
+    /// Classes that inherit from this one, directly or not. The class itself is not included.
+    pub subclass_of: Option<String>,
+    /// Class name globs.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+}
+
 impl Rule {
     pub fn has_code_checks(&self) -> bool {
         !self.code_keys().is_empty()
@@ -175,6 +208,13 @@ impl Rule {
             ("same_placeholders", self.same_placeholders),
             ("literal_argument", self.literal_argument.is_some()),
             ("max_lines", self.max_lines.is_some()),
+            ("require_call", !self.require_call.is_empty()),
+            ("require_method", !self.require_method.is_empty()),
+            ("require_field", !self.require_field.is_empty()),
+            ("forbid_field", !self.forbid_field.is_empty()),
+            ("in_class", self.in_class.is_some()),
+            ("within_function", !self.within_function.is_empty()),
+            ("except_function", !self.except_function.is_empty()),
         ] {
             if present {
                 keys.push(key);
@@ -253,6 +293,33 @@ impl Rule {
         if !self.within_property.is_empty() {
             out.push(format!("(only inside a property named {})", self.within_property.join(", ")));
         }
+        if !self.require_call.is_empty() {
+            let scope = if self.within_function.is_empty() { "files" } else { "functions" };
+            out.push(format!("{scope} that never call {}", self.require_call.join(", ")));
+        }
+        let classes = self.in_class.as_ref().map_or_else(String::new, |c| {
+            let mut parts = Vec::new();
+            if let Some(base) = &c.subclass_of {
+                parts.push(format!("subclasses of {base}"));
+            }
+            if !c.names.is_empty() {
+                parts.push(format!("named {}", c.names.join("/")));
+            }
+            format!(" (classes: {})", parts.join(", "))
+        });
+        if !self.require_method.is_empty() {
+            out.push(format!("classes without the method {}{classes}", self.require_method.join(", ")));
+        }
+        if !self.require_field.is_empty() {
+            out.push(format!("classes without the field {}{classes}", self.require_field.join(", ")));
+        }
+        if !self.forbid_field.is_empty() {
+            out.push(format!("fields named {}{classes}", self.forbid_field.join(", ")));
+        }
+        if !self.within_function.is_empty() {
+            let except = if self.except_function.is_empty() { String::new() } else { format!(" except {}", self.except_function.join(", ")) };
+            out.push(format!("(only inside functions named {}{except})", self.within_function.join(", ")));
+        }
         if let Some(max) = self.max_lines {
             out.push(format!("files longer than {max} lines"));
         }
@@ -260,6 +327,11 @@ impl Rule {
             out.push(format!("file names other than {}", self.require_filename.join(", ")));
         }
         out
+    }
+
+    /// The highest `{n}` placeholder written in `forbid_import` or `except_import`, 0 if there is none.
+    pub fn max_placeholder(&self) -> usize {
+        self.forbid_import.iter().chain(&self.except_import).flat_map(|p| super::captures::placeholders(p)).max().unwrap_or(0)
     }
 
     pub fn applies_to(&self, language: Language) -> bool {
