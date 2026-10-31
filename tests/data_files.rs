@@ -209,3 +209,33 @@ fn init_scaffolds_an_empty_valid_config_and_never_overwrites() {
     assert!(String::from_utf8_lossy(&again.stderr).contains("--force"));
     assert_eq!(project.prlint(&["init", "--force"]).status.code(), Some(0));
 }
+
+#[test]
+fn json_and_sarif_output_are_documents_on_stdout() {
+    let project = Project::new(
+        "formats",
+        &[
+            ("prlint.yaml", "rules:\n  no-print:\n    language: python\n    forbid_call: [print]\n    rationale: Use the logger.\n    fix: Call logging.info.\nscopes:\n  - rules: [no-print]\n    include: ['**']\n"),
+            ("a.py", "print(1)\n"),
+        ],
+    );
+    let json = project.prlint(&["check", "--format", "json"]);
+    assert_eq!(json.status.code(), Some(1));
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&json)).unwrap();
+    assert_eq!(doc["violations"][0]["rule"], "no-print");
+    assert_eq!(doc["violations"][0]["fix"], "Call logging.info.");
+    assert_eq!(doc["summary"]["violations"], 1);
+
+    let sarif = project.prlint(&["check", "--format", "sarif"]);
+    assert_eq!(sarif.status.code(), Some(1));
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&sarif)).unwrap();
+    assert_eq!(doc["version"], "2.1.0");
+    assert_eq!(doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "a.py");
+
+    // A clean project still gives a valid, empty document.
+    project.write("a.py", "x = 1\n");
+    let clean = project.prlint(&["check", "--format", "json"]);
+    assert_eq!(clean.status.code(), Some(0));
+    let doc: serde_json::Value = serde_json::from_str(&stdout(&clean)).unwrap();
+    assert_eq!(doc["violations"].as_array().unwrap().len(), 0);
+}

@@ -55,6 +55,7 @@ prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root
 | Flag | What it does |
 |---|---|
 | `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. Combined with `PATH` arguments, a file must be both staged and selected. |
+| `--format <FORMAT>` | `check` only. `text` (default) is for people. `json` prints one document with `violations` (each with `rule`, `file`, `line`, `column`, `message`, `rationale` and `fix`) and a `summary`, for scripts and AI agents. `sarif` prints SARIF 2.1.0 for GitHub code scanning and editors; the `fix` goes in the rule's `help` and the result message. With `json` or `sarif`, stdout holds only the document (warnings go to stderr), and the exit code is the same: `1` when there are violations. |
 | `-c, --config <path>` | Path to the config file. Defaults to `prlint.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |
@@ -108,6 +109,15 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `prlint validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
+
+### Output for tools
+
+```bash
+prlint check --format json > prlint-report.json
+prlint check --format sarif > prlint.sarif
+```
+
+To show violations as annotations on pull requests, upload the SARIF file with GitHub's `github/codeql-action/upload-sarif` step.
 
 ## Suppressing violations
 

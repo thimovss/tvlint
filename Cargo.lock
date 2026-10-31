@@ -255,6 +255,7 @@ dependencies = [
  "ignore",
  "rayon",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
  "tree-sitter",
  "tree-sitter-javascript",

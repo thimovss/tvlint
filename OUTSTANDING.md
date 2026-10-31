@@ -25,7 +25,6 @@ Done items are removed from this list.
 
 CLAUDE.md still describes a product that does not exist yet. Not built:
 
-- JSON and SARIF output
 - a mandatory reason on suppressions (optional today)
 
 Decision needed: update the brief to match what exists (`prlint`, `prlint.yaml`), or move these to a roadmap.

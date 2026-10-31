@@ -3,6 +3,7 @@ mod check;
 mod config;
 mod data;
 mod init;
+mod report;
 mod scope;
 mod select;
 mod source;
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 
 use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename, normalize_file, unused_registry_entries};
@@ -34,6 +35,17 @@ struct Cli {
     command: Option<Command>,
 }
 
+/// How `check` prints its results.
+#[derive(Clone, Copy, ValueEnum)]
+enum Format {
+    /// For people: one block per violation, with the reason and the fix
+    Text,
+    /// A JSON document of violations and a summary, for scripts and AI agents
+    Json,
+    /// SARIF 2.1.0, for GitHub code scanning and editors
+    Sarif,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Check the project against all rules (exit 1 if any violation is found)
@@ -46,6 +58,9 @@ enum Command {
         /// file must be both staged and selected
         #[arg(long)]
         staged: bool,
+        /// Output format. With `json` or `sarif`, stdout holds only the document; warnings go to stderr
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
     },
     /// Show why a rule exists, what it forbids and where it applies
     Explain {
@@ -70,8 +85,8 @@ pub const SCHEMA: &str = include_str!("../prlint.schema.json");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command.unwrap_or(Command::Check { paths: Vec::new(), staged: false }) {
-        Command::Check { paths, staged } => check(&cli.config, &paths, staged).map(|violations| u8::from(violations > 0)),
+    let result = match cli.command.unwrap_or(Command::Check { paths: Vec::new(), staged: false, format: Format::Text }) {
+        Command::Check { paths, staged, format } => check(&cli.config, &paths, staged, format).map(|violations| u8::from(violations > 0)),
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
         Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
@@ -91,7 +106,7 @@ fn main() -> ExitCode {
 }
 
 /// Returns the number of violations found.
-fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
+fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> Result<usize> {
     let config = Config::load(config_path)?;
     let root = std::path::absolute(config_path)?
         .parent()
@@ -243,34 +258,40 @@ fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
     }
 
     violations.sort_by(|a, b| (&a.path, a.line, a.column, &a.rule_id).cmp(&(&b.path, b.line, b.column, &b.rule_id)));
-    for v in &violations {
-        let rule = rules[v.rule_id.as_str()].rule;
-        println!("{}:{}:{}: error[{}] {}", v.path, v.line, v.column, v.rule_id, v.message);
-        println!("    why: {}", rule.rationale.trim());
-        println!("    fix: {}", rule.fix.trim());
-    }
-    // What was hidden stays visible in the summary, so suppressions can be audited.
-    let mut notes = Vec::new();
-    if suppressed > 0 {
-        notes.push(format!("{suppressed} hidden by prlint-ignore-next-line"));
-    }
     let ignored_in_scope = ignored
         .iter()
         .filter(|p| selected(p))
         .filter(|p| scopes.iter().any(|s| s.matches(p)))
         .count();
-    if ignored_in_scope > 0 {
-        notes.push(format!("{ignored_in_scope} file(s) skipped by prlint-ignore-file"));
-    }
-    let notes = if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join(", ")) };
-    if violations.is_empty() {
-        println!("prlint: no violations ({} files checked){notes}", checked.len());
-    } else {
-        println!(
-            "prlint: {} violation(s) in {} file(s){notes}",
-            violations.len(),
-            violations.iter().map(|v| &v.path).collect::<BTreeSet<_>>().len()
-        );
+    let files_with_violations = violations.iter().map(|v| &v.path).collect::<BTreeSet<_>>().len();
+    match format {
+        Format::Json => {
+            let summary = report::Summary { files_checked: checked.len(), files_with_violations, suppressed, files_ignored: ignored_in_scope };
+            println!("{}", report::json(&violations, &config.rules, &summary));
+        }
+        Format::Sarif => println!("{}", report::sarif(&violations, &config.rules)),
+        Format::Text => {
+            for v in &violations {
+                let rule = rules[v.rule_id.as_str()].rule;
+                println!("{}:{}:{}: error[{}] {}", v.path, v.line, v.column, v.rule_id, v.message);
+                println!("    why: {}", rule.rationale.trim());
+                println!("    fix: {}", rule.fix.trim());
+            }
+            // What was hidden stays visible in the summary, so suppressions can be audited.
+            let mut notes = Vec::new();
+            if suppressed > 0 {
+                notes.push(format!("{suppressed} hidden by prlint-ignore-next-line"));
+            }
+            if ignored_in_scope > 0 {
+                notes.push(format!("{ignored_in_scope} file(s) skipped by prlint-ignore-file"));
+            }
+            let notes = if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join(", ")) };
+            if violations.is_empty() {
+                println!("prlint: no violations ({} files checked){notes}", checked.len());
+            } else {
+                println!("prlint: {} violation(s) in {files_with_violations} file(s){notes}", violations.len());
+            }
+        }
     }
     Ok(violations.len())
 }
