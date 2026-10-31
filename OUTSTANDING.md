@@ -4,9 +4,7 @@ Done items are removed from this list.
 
 ## Needs a decision
 
-1. **Branch.** The repo is on `master`; the main branch is `main`. Commits are local, nothing is pushed. PR, or merge into `main`?
-2. **`.idea/linter.iml`.** One-line change not made in this work. Commit, ignore or revert?
-3. **CLAUDE.md open questions**, still unanswered: open-core vs commercial, shareable rule packs, how much cross-file analysis is worth it.
+1. **CLAUDE.md open questions**, still unanswered: open-core vs commercial, shareable rule packs, how much cross-file analysis is worth it.
 
 ## Performance
 
