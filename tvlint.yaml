@@ -59,9 +59,9 @@ rules:
     forbid_import: ["serde_yaml_ng", "serde_yaml_ng::**"]
     forbid_call: ["serde_yaml_ng::*"]
     rationale: >
-      config.rs loads the config with a strict schema, and src/validate/ reads the raw YAML to report every problem.
+      src/config/ loads the config with a strict schema, and src/validate/ reads the raw YAML to report every problem.
       Other code reading YAML would skip both.
-    fix: Go through Config, from src/config.rs.
+    fix: Go through Config, from src/config/.
 
   # ---- Determinism ------------------------------------------------------------------------------
   # The same input must give the same output, so violations are reported in a stable order.
@@ -88,15 +88,15 @@ rules:
     language: rust
     forbid_import: ["crate::**"]
     except_import: ["crate::config::**", "crate::config", "crate::select::**", "crate::select"]
-    rationale: config.rs defines the model every other module is written against, and select.rs is self-contained. Neither may depend on the rest.
-    fix: Move the shared type down into src/config.rs, or pass the value in as an argument.
+    rationale: src/config/ defines the model every other module is written against, and select.rs is self-contained. Neither may depend on the rest.
+    fix: Move the shared type down into src/config/, or pass the value in as an argument.
 
   data-depends-on-config-and-source:
     language: rust
     forbid_import: ["crate::**"]
     except_import: ["crate::data", "crate::data::**", "crate::config", "crate::config::**", "crate::source", "crate::source::**"]
-    rationale: data.rs turns JSON, YAML and TOML syntax trees into one value model. It reads parsed files and rule settings, and nothing that evaluates rules.
-    fix: Pass what data.rs needs in as an argument.
+    rationale: src/data/ turns JSON, YAML and TOML syntax trees into one value model. It reads parsed files and rule settings, and nothing that evaluates rules.
+    fix: Pass what src/data/ needs in as an argument.
 
   io-modules-depend-on-config-only:
     language: rust
@@ -164,25 +164,25 @@ scopes:
     include: ["src/**"]
     exclude: ["src/source.rs"]
 
-  # Excluded: data.rs is the adapter for JSON, YAML and TOML, suppress.rs asks only whether a node is a
+  # Excluded: src/data/ is the adapter for JSON, YAML and TOML, suppress.rs asks only whether a node is a
   # comment, which every grammar names `comment` or `*_comment`, and src/validate/ calls .kind() on glob
   # errors, not syntax nodes.
   - rules: [node-kinds-only-in-adapters]
     include: ["src/**"]
-    exclude: ["src/adapters/**", "src/data.rs", "src/suppress.rs", "src/validate/**"]
+    exclude: ["src/adapters/**", "src/data/**", "src/suppress.rs", "src/validate/**"]
 
   - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections, no-huge-files]
     include: ["src/**"]
 
   - rules: [yaml-only-in-config-and-validate]
     include: ["src/**"]
-    exclude: ["src/config.rs", "src/validate/**"]
+    exclude: ["src/config/**", "src/validate/**"]
 
   - rules: [foundation-modules-import-nothing]
-    include: ["src/config.rs", "src/select.rs"]
+    include: ["src/config/**", "src/select.rs"]
 
   - rules: [data-depends-on-config-and-source]
-    include: ["src/data.rs"]
+    include: ["src/data/**"]
 
   - rules: [io-modules-depend-on-config-only]
     include: ["src/source.rs", "src/scope.rs"]
