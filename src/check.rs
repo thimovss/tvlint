@@ -1105,6 +1105,26 @@ useQuery({ queryKey: [...base, accountID] });\n";
         );
     }
 
+    // ---- HTML
+
+    fn html_rule() -> Rule {
+        Rule { language: vec![Language::Html], ..empty_rule() }
+    }
+
+    #[test]
+    fn html_elements_match_case_insensitively_including_self_closing() {
+        let src = "<div>\n<BUTTON class=\"a\">x</BUTTON>\n<img src=\"i.png\">\n<input />\n<script>var a = 1;</script>\n</div>\n";
+        let r = Rule { forbid_element: vec!["button".into(), "input".into(), "script".into(), "img".into()], ..html_rule() };
+        assert_eq!(lines("a.html", src, &r), [2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn html_attributes_are_properties() {
+        let src = "<p onclick=\"go()\" STYLE='x'>\n<input disabled data-id=\"7\">\n</p>\n";
+        let r = Rule { forbid_property: ["onclick", "style", "disabled"].into_iter().map(String::from).collect(), ..html_rule() };
+        assert_eq!(lines("a.html", src, &r), [1, 1, 2]);
+    }
+
     fn imports(path: &str, source: &str, forbid: &[&str], except: &[&str]) -> Vec<String> {
         let r = Rule {
             forbid_import: forbid.iter().map(|s| s.to_string()).collect(),

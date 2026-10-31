@@ -38,13 +38,13 @@
 
     "language": {
       "description": "A language a rule can apply to. Code languages are parsed; JSON, YAML and TOML are data files checked by key path.",
-      "enum": ["python", "javascript", "typescript", "rust", "go", "json", "yaml", "toml"]
+      "enum": ["python", "javascript", "typescript", "rust", "go", "html", "json", "yaml", "toml"]
     },
     "languages": {
-      "description": "`python`, `javascript`, `typescript`, `rust`, `go`, `json`, `yaml` or `toml`, or a list of them. Code languages and data languages cannot share a rule.",
+      "description": "`python`, `javascript`, `typescript`, `rust`, `go`, `html`, `json`, `yaml` or `toml`, or a list of them. Code languages and data languages cannot share a rule.",
       "anyOf": [
         { "$ref": "#/$defs/language" },
-        { "type": "array", "minItems": 1, "items": { "enum": ["python", "javascript", "typescript", "rust", "go"] } },
+        { "type": "array", "minItems": 1, "items": { "enum": ["python", "javascript", "typescript", "rust", "go", "html"] } },
         { "type": "array", "minItems": 1, "items": { "enum": ["json", "yaml", "toml"] } }
       ]
     },
@@ -72,6 +72,13 @@
         { "type": "array", "items": { "enum": ["javascript", "typescript", "rust", "go"] } }
       ]
     },
+    "onlyElements": {
+      "description": "JSX elements (JavaScript, TypeScript) and HTML tags.",
+      "anyOf": [
+        { "enum": ["javascript", "typescript", "html"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "html"] } }
+      ]
+    },
     "onlyEcmaScript": {
       "anyOf": [
         { "enum": ["javascript", "typescript"] },
@@ -79,10 +86,10 @@
       ]
     },
     "onlyObjectLiterals": {
-      "description": "JavaScript and TypeScript object literals, and the key paths of data files.",
+      "description": "JavaScript and TypeScript object literals, HTML attributes, and the key paths of data files.",
       "anyOf": [
-        { "enum": ["javascript", "typescript", "json", "yaml", "toml"] },
-        { "type": "array", "items": { "enum": ["javascript", "typescript", "json", "yaml", "toml"] } }
+        { "enum": ["javascript", "typescript", "html", "json", "yaml", "toml"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "html", "json", "yaml", "toml"] } }
       ]
     },
     "onlyData": {
@@ -204,7 +211,7 @@
           "$ref": "#/$defs/stringList"
         },
         "forbid_element": {
-          "description": "JavaScript, TypeScript. JSX element names that may not be used, e.g. `button`. Matched on the tag as written, so `button` does not match `Button`.",
+          "description": "JavaScript, TypeScript, HTML. JSX element or HTML tag names that may not be used, e.g. `button`. JSX is matched as written, so `button` does not match `Button`; HTML tags are matched in lowercase.",
           "$ref": "#/$defs/stringList"
         },
         "forbid_property": {
@@ -296,7 +303,7 @@
         { "if": { "required": ["forbid_catch"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyPython" } } } },
         { "if": { "required": ["forbid_import"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyImporting" } } } },
         { "if": { "required": ["except_import"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyImporting" } } } },
-        { "if": { "required": ["forbid_element"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
+        { "if": { "required": ["forbid_element"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyElements" } } } },
         { "if": { "required": ["within_property"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
         { "if": { "required": ["forbid_property"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyObjectLiterals" } } } },
         { "if": { "required": ["property_value"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyObjectLiterals" } } } },

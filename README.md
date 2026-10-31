@@ -105,11 +105,12 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
 | `rust` | `.rs` |
 | `go` | `.go` |
+| `html` | `.html`, `.htm` |
 | `json` | `.json`, `.jsonc` |
 | `yaml` | `.yaml`, `.yml` |
 | `toml` | `.toml` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `tvl validate` says so when a rule asks a language for something it cannot do.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have object-literal checks. HTML is markup, so it has no calls or imports: it supports `forbid_element` (tag names, case-insensitive), `forbid_property` (attribute names) and `property_value` with `forbid_literal` (attributes that carry a value), plus `require_filename`. Code inside `<script>` and `<style>` is not parsed. `tvl validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 
@@ -173,7 +174,7 @@ raise ValueError("not found")
 // tvlint-ignore-file: generated code
 ```
 
-- Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX.
+- Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX; `<!-- -->` in HTML.
 - The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
 - **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvlint-ignore-next-line`) hides the next line, not its own.
 - **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Only Python, JavaScript and TypeScript files can carry it.
@@ -288,8 +289,8 @@ scopes:
 | `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
 | `forbid_import` | JavaScript, TypeScript and Rust. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`; in Rust `use` and `extern crate`, where `use a::{b, c}` counts as `a::b` and `a::c`, and `self::` and `super::` are resolved to `crate::` paths). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). Rust patterns are written with `::` (`sqlx::**`, `crate::db::**`). |
 | `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. |
-| `forbid_element` | JavaScript and TypeScript. JSX element names that may not be used, e.g. `[button, textarea]`. Matched on the tag as written, so `button` does not match `Button`. |
-| `forbid_property` | JavaScript and TypeScript: object-literal property names that may not appear (`{ onError: ... }`). JSX attributes such as `<img onError={...}>` are not properties. JSON, YAML and TOML: key paths that may not exist, e.g. `scripts.postinstall` ([key paths](#data-files)). |
+| `forbid_element` | JavaScript, TypeScript and HTML. JSX element or HTML tag names that may not be used, e.g. `[button, textarea]`. JSX is matched as written, so `button` does not match `Button`; HTML tag and attribute names are lowercased first. |
+| `forbid_property` | JavaScript and TypeScript: object-literal property names that may not appear (`{ onError: ... }`). HTML: attribute names such as `onclick` or `style`. JSX attributes such as `<img onError={...}>` are not properties. JSON, YAML and TOML: key paths that may not exist, e.g. `scripts.postinstall` ([key paths](#data-files)). |
 | `property_value` | JavaScript and TypeScript: constraints on the value of object-literal properties: `names` (required), then `forbid_literal: true` (the value may not be a string literal) and/or `array_starts_with: accountID` (an array-literal value must start with that element; other values are not checked). `in_call: toast.add` limits it to objects passed directly to that call. JSON, YAML and TOML: `names` are key paths, with `forbid_value` and/or `require_value` (globs, see [Data files](#data-files)). |
 | `require_property` | JSON, YAML and TOML. Key paths that must exist, e.g. `jobs.*.timeout-minutes`: every place the parent path (`jobs.*`) matches must contain the key. |
 | `same_keys_as` | JSON, YAML and TOML. Path to a reference file. Every file in the rule's scope must have exactly its keys: missing and extra keys are reported. The reference itself is skipped. |

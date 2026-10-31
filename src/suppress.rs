@@ -67,8 +67,8 @@ impl Suppressions {
 fn directive(comment: &str) -> Option<&'static str> {
     let body = comment
         .trim()
-        .trim_start_matches(['#', '/', '*', '!'])
-        .trim_end_matches(['*', '/'])
+        .trim_start_matches(['#', '/', '*', '!', '<', '-'])
+        .trim_end_matches(['*', '/', '-', '>', ' '])
         .trim_start();
     [NEXT_LINE, FILE].into_iter().find(|name| {
         body.strip_prefix(name)
@@ -107,6 +107,13 @@ mod tests {
         assert!(hidden("a.rs", "let s = \"// tvlint-ignore-next-line\";\nx;\n").is_empty());
         assert!(scan("a.rs", "// tvlint-ignore-file\nfn f() {}\n").ignore_file);
         assert!(!scan("a.rs", "fn f() {}\n// tvlint-ignore-file\n").ignore_file);
+    }
+
+    #[test]
+    fn html_comments() {
+        assert_eq!(hidden("a.html", "<!-- tvlint-ignore-next-line: legacy -->\n<font>x</font>\n<font>y</font>\n"), [2]);
+        assert_eq!(hidden("a.html", "<p>\n<!--tvlint-ignore-next-line-->\n<font>x</font>\n</p>\n"), [3]);
+        assert!(scan("a.html", "<!-- tvlint-ignore-file -->\n<p></p>\n").ignore_file);
     }
 
     #[test]

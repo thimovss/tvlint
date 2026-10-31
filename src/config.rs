@@ -45,6 +45,7 @@ pub enum Language {
     TypeScript,
     Rust,
     Go,
+    Html,
     Json,
     Yaml,
     Toml,
@@ -57,6 +58,7 @@ impl Language {
         Language::TypeScript,
         Language::Rust,
         Language::Go,
+        Language::Html,
         Language::Json,
         Language::Yaml,
         Language::Toml,
@@ -74,6 +76,7 @@ impl Language {
             Language::TypeScript => "typescript",
             Language::Rust => "rust",
             Language::Go => "go",
+            Language::Html => "html",
             Language::Json => "json",
             Language::Yaml => "yaml",
             Language::Toml => "toml",
@@ -89,6 +92,9 @@ impl Language {
         use Language::*;
         if self.is_data() {
             return matches!(key, "forbid_property" | "property_value" | "require_property" | "same_keys_as" | "same_placeholders");
+        }
+        if self == Html {
+            return matches!(key, "forbid_element" | "forbid_property" | "property_value" | "require_filename");
         }
         match key {
             "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
@@ -108,6 +114,7 @@ impl Language {
             return "JSON, YAML and TOML files are checked by key path: use forbid_property, require_property, property_value, same_keys_as";
         }
         match (self, key) {
+            (Language::Html, _) => "HTML supports forbid_element (tag names), forbid_property (attribute names) and property_value (attribute values)",
             (_, "require_property" | "same_keys_as" | "same_placeholders") => "these checks read JSON, YAML and TOML files",
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""
@@ -116,7 +123,7 @@ impl Language {
             (_, "forbid_catch") => "only Python `except` clauses name the type they catch",
             (Language::Python, "forbid_import" | "except_import") => "import rules are not supported for Python yet",
             (_, "forbid_import" | "except_import") => "import rules are not supported for this language",
-            _ => "JSX elements and object literals exist only in JavaScript and TypeScript",
+            _ => "JSX elements, object literals and within_property exist only in JavaScript and TypeScript",
         }
     }
 
@@ -125,6 +132,7 @@ impl Language {
             "py" => Some(Language::Python),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
+            "html" | "htm" => Some(Language::Html),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "json" | "jsonc" => Some(Language::Json),
