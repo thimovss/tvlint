@@ -175,17 +175,17 @@ scopes:
         "suppress",
         &[
             ("tvl.yaml", rules),
-            ("cfg/a.yaml", "# tvl-ignore-next-line: legacy\ndebug: true\n"),
-            ("cfg/b.toml", "# tvl-ignore-next-line: legacy\ndebug = true\n"),
-            ("cfg/c.json", "{\n  // tvl-ignore-next-line: legacy\n  \"debug\": true\n}\n"),
-            ("cfg/d.yaml", "# tvl-ignore-file\ndebug: true\n"),
+            ("cfg/a.yaml", "# tvlint-ignore-next-line: legacy\ndebug: true\n"),
+            ("cfg/b.toml", "# tvlint-ignore-next-line: legacy\ndebug = true\n"),
+            ("cfg/c.json", "{\n  // tvlint-ignore-next-line: legacy\n  \"debug\": true\n}\n"),
+            ("cfg/d.yaml", "# tvlint-ignore-file\ndebug: true\n"),
             ("cfg/e.yaml", "debug: true\n"),
         ],
     );
     let out = p.tvl(&["check"]);
     assert_eq!(violations(&out), ["cfg/e.yaml:1:1"], "{}", stdout(&out));
-    assert!(stdout(&out).contains("3 hidden by tvl-ignore-next-line"), "{}", stdout(&out));
-    assert!(stdout(&out).contains("1 file(s) skipped by tvl-ignore-file"), "{}", stdout(&out));
+    assert!(stdout(&out).contains("3 hidden by tvlint-ignore-next-line"), "{}", stdout(&out));
+    assert!(stdout(&out).contains("1 file(s) skipped by tvlint-ignore-file"), "{}", stdout(&out));
 }
 
 

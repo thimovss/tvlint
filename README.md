@@ -125,29 +125,29 @@ Two comments switch checks off. They work the same in Python, JavaScript and Typ
 
 | Comment | Effect |
 |---|---|
-| `tvl-ignore-next-line` | Hides every violation reported on the line directly after the comment. |
-| `tvl-ignore-file` | On line 1 of the file, excludes the whole file from every rule, file-name rules included. |
+| `tvlint-ignore-next-line` | Hides every violation reported on the line directly after the comment. |
+| `tvlint-ignore-file` | On line 1 of the file, excludes the whole file from every rule, file-name rules included. |
 
 ```python
-# tvl-ignore-next-line: legacy endpoint, see ISSUE-123
+# tvlint-ignore-next-line: legacy endpoint, see ISSUE-123
 raise ValueError("not found")
 ```
 
 ```tsx
-{/* tvl-ignore-next-line */}
+{/* tvlint-ignore-next-line */}
 <button onClick={open}>Open</button>
 ```
 
 ```ts
-// tvl-ignore-file: generated code
+// tvlint-ignore-file: generated code
 ```
 
 - Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX.
 - The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
-- **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvl-ignore-next-line`) hides the next line, not its own.
+- **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvlint-ignore-next-line`) hides the next line, not its own.
 - **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Only Python, JavaScript and TypeScript files can carry it.
 - An ignored file is still read to learn its classes, so other files' `forbid_catch` results do not change when a file opts out.
-- Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `tvl: 7 violation(s) in 4 file(s) [5 hidden by tvl-ignore-next-line, 3 file(s) skipped by tvl-ignore-file]`.
+- Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `tvl: 7 violation(s) in 4 file(s) [5 hidden by tvlint-ignore-next-line, 3 file(s) skipped by tvlint-ignore-file]`.
 
 ## Data files
 
@@ -166,7 +166,7 @@ JSON, YAML and TOML files are read into one model of maps, lists and values, so 
 - **`require_property`** splits the path into the container and the key: `jobs.*.timeout-minutes` means "every job has `timeout-minutes`". A container that does not exist (`permissions.contents` when there is no `permissions`) is reported once for the file; a wildcard container that matches nothing is fine. The last segment must be a key name. In a multi-document YAML file every document is checked.
 - **`property_value`** looks at the scalar values at the `names` paths, with `forbid_value: [globs]` (none may match) and/or `require_value: [globs]` (one must match). Values are plain text, so `true`, `"true"` and `1.0` are just the text of the value, and quotes and escapes are removed. Lists and mappings are skipped. Values are globs, where `*` matches anything: write a literal star as `[*]` (`forbid_value: ["[*]"]` forbids a wildcard version).
 - **`same_keys_as`** compares the keys of every in-scope file with a reference file (usually the source-language translation): `a.b` must exist in both. Lists count as values. Add `same_placeholders: true` to also compare the `{{name}}`, `{name}` and ICU `{count, plural, ...}` names in each message.
-- Comments work as in code: in YAML and TOML, `# tvl-ignore-next-line` hides the violations of the next line, and `# tvl-ignore-file` on line 1 skips the file. JSON has no comment syntax of its own, but the parser accepts `//` and `/* */` comments, so a directive works in `.json` and `.jsonc` files alike (tools that read the file strictly will reject them).
+- Comments work as in code: in YAML and TOML, `# tvlint-ignore-next-line` hides the violations of the next line, and `# tvlint-ignore-file` on line 1 skips the file. JSON has no comment syntax of its own, but the parser accepts `//` and `/* */` comments, so a directive works in `.json` and `.jsonc` files alike (tools that read the file strictly will reject them).
 - YAML aliases (`*name`) and merge keys (`<<`) are not resolved; an alias is a value whose text is `*name`.
 
 ```yaml

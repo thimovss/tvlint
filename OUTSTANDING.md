@@ -22,4 +22,4 @@ Done items are removed from this list.
 
 ## Product brief versus reality
 
-- A mandatory reason on suppressions. Today `tvl-ignore-next-line` takes an optional reason, and the brief calls for a required one.
+- A mandatory reason on suppressions. Today `tvlint-ignore-next-line` takes an optional reason, and the brief calls for a required one.

@@ -1,22 +1,22 @@
 //! Inline suppression comments, the same in every language:
 //!
-//! - `tvl-ignore-next-line` hides every violation reported on the line after the comment.
-//! - `tvl-ignore-file`, as a comment on line 1, excludes the whole file.
+//! - `tvlint-ignore-next-line` hides every violation reported on the line after the comment.
+//! - `tvlint-ignore-file`, as a comment on line 1, excludes the whole file.
 //!
 //! Directives are read from comment nodes in the syntax tree, so the same words inside a string
-//! are ignored. A directive may be followed by a reason: `// tvl-ignore-next-line: why`.
+//! are ignored. A directive may be followed by a reason: `// tvlint-ignore-next-line: why`.
 
 use std::collections::HashSet;
 
 use crate::check::visit;
 use crate::source::SourceFile;
 
-const NEXT_LINE: &str = "tvl-ignore-next-line";
-const FILE: &str = "tvl-ignore-file";
+const NEXT_LINE: &str = "tvlint-ignore-next-line";
+const FILE: &str = "tvlint-ignore-file";
 
 #[derive(Default)]
 pub struct Suppressions {
-    /// Line 1 holds a `tvl-ignore-file` comment.
+    /// Line 1 holds a `tvlint-ignore-file` comment.
     pub ignore_file: bool,
     /// 1-based lines whose violations are hidden.
     next_lines: HashSet<usize>,
@@ -26,7 +26,7 @@ impl Suppressions {
     pub fn scan(file: &SourceFile) -> Suppressions {
         let mut found = Suppressions::default();
         // Most files have no directive; skip walking the tree for them.
-        if !file.text.contains("tvl-ignore") {
+        if !file.text.contains("tvlint-ignore") {
             return found;
         }
         let first_line_start = file.text.strip_prefix('\u{feff}').map_or(0, |_| '\u{feff}'.len_utf8());
@@ -93,63 +93,63 @@ mod tests {
 
     #[test]
     fn next_line_comment_forms() {
-        assert_eq!(hidden("a.py", "x = 1\n# tvl-ignore-next-line\ny = 2\nz = 3\n"), [3]);
-        assert_eq!(hidden("a.ts", "a;\n// tvl-ignore-next-line\nb;\nc;\n"), [3]);
-        assert_eq!(hidden("a.ts", "a;\n/* tvl-ignore-next-line */\nb;\nc;\n"), [3]);
-        assert_eq!(hidden("a.tsx", "const a = (\n  <div>\n    {/* tvl-ignore-next-line */}\n    <button />\n  </div>\n);\n"), [4]);
+        assert_eq!(hidden("a.py", "x = 1\n# tvlint-ignore-next-line\ny = 2\nz = 3\n"), [3]);
+        assert_eq!(hidden("a.ts", "a;\n// tvlint-ignore-next-line\nb;\nc;\n"), [3]);
+        assert_eq!(hidden("a.ts", "a;\n/* tvlint-ignore-next-line */\nb;\nc;\n"), [3]);
+        assert_eq!(hidden("a.tsx", "const a = (\n  <div>\n    {/* tvlint-ignore-next-line */}\n    <button />\n  </div>\n);\n"), [4]);
     }
 
     #[test]
     fn rust_comments() {
-        assert_eq!(hidden("a.rs", "fn f() {\n    // tvl-ignore-next-line\n    x.unwrap();\n    y.unwrap();\n}\n"), [3]);
-        assert_eq!(hidden("a.rs", "/* tvl-ignore-next-line */\nx.unwrap();\n"), [2]);
-        assert_eq!(hidden("a.rs", "/// tvl-ignore-next-line\nfn f() {}\n"), [2]);
-        assert!(hidden("a.rs", "let s = \"// tvl-ignore-next-line\";\nx;\n").is_empty());
-        assert!(scan("a.rs", "// tvl-ignore-file\nfn f() {}\n").ignore_file);
-        assert!(!scan("a.rs", "fn f() {}\n// tvl-ignore-file\n").ignore_file);
+        assert_eq!(hidden("a.rs", "fn f() {\n    // tvlint-ignore-next-line\n    x.unwrap();\n    y.unwrap();\n}\n"), [3]);
+        assert_eq!(hidden("a.rs", "/* tvlint-ignore-next-line */\nx.unwrap();\n"), [2]);
+        assert_eq!(hidden("a.rs", "/// tvlint-ignore-next-line\nfn f() {}\n"), [2]);
+        assert!(hidden("a.rs", "let s = \"// tvlint-ignore-next-line\";\nx;\n").is_empty());
+        assert!(scan("a.rs", "// tvlint-ignore-file\nfn f() {}\n").ignore_file);
+        assert!(!scan("a.rs", "fn f() {}\n// tvlint-ignore-file\n").ignore_file);
     }
 
     #[test]
     fn a_block_comment_hides_the_line_after_its_end() {
-        assert_eq!(hidden("a.ts", "a;\n/* tvl-ignore-next-line\n   because */\nb;\nc;\n"), [4]);
+        assert_eq!(hidden("a.ts", "a;\n/* tvlint-ignore-next-line\n   because */\nb;\nc;\n"), [4]);
     }
 
     #[test]
     fn a_reason_may_follow() {
-        assert_eq!(hidden("a.py", "# tvl-ignore-next-line: legacy endpoint\nx = 1\n"), [2]);
-        assert_eq!(hidden("a.ts", "// tvl-ignore-next-line - generated\nx;\n"), [2]);
+        assert_eq!(hidden("a.py", "# tvlint-ignore-next-line: legacy endpoint\nx = 1\n"), [2]);
+        assert_eq!(hidden("a.ts", "// tvlint-ignore-next-line - generated\nx;\n"), [2]);
     }
 
     #[test]
     fn only_a_comment_that_starts_with_the_directive_counts() {
-        assert!(hidden("a.py", "x = 'tvl-ignore-next-line'\ny = 2\n").is_empty());
-        assert!(hidden("a.ts", "const s = '// tvl-ignore-next-line';\nx;\n").is_empty());
-        assert!(hidden("a.ts", "// we never write tvl-ignore-next-line here\nx;\n").is_empty());
-        assert!(hidden("a.py", "# tvl-ignore-next-lines\nx = 1\n").is_empty());
-        assert!(hidden("a.py", "# tvl-ignore-next-line-all\nx = 1\n").is_empty());
+        assert!(hidden("a.py", "x = 'tvlint-ignore-next-line'\ny = 2\n").is_empty());
+        assert!(hidden("a.ts", "const s = '// tvlint-ignore-next-line';\nx;\n").is_empty());
+        assert!(hidden("a.ts", "// we never write tvlint-ignore-next-line here\nx;\n").is_empty());
+        assert!(hidden("a.py", "# tvlint-ignore-next-lines\nx = 1\n").is_empty());
+        assert!(hidden("a.py", "# tvlint-ignore-next-line-all\nx = 1\n").is_empty());
     }
 
     #[test]
     fn a_trailing_comment_hides_the_next_line_not_its_own() {
-        assert_eq!(hidden("a.py", "x = 1  # tvl-ignore-next-line\ny = 2\n"), [2]);
+        assert_eq!(hidden("a.py", "x = 1  # tvlint-ignore-next-line\ny = 2\n"), [2]);
     }
 
     #[test]
     fn ignore_file_must_be_a_comment_on_line_one() {
-        assert!(scan("a.py", "# tvl-ignore-file\nx = 1\n").ignore_file);
-        assert!(scan("a.ts", "// tvl-ignore-file\nx;\n").ignore_file);
-        assert!(scan("a.ts", "/* tvl-ignore-file: generated */\nx;\n").ignore_file);
-        assert!(scan("a.ts", "\u{feff}// tvl-ignore-file\nx;\n").ignore_file);
-        assert!(!scan("a.py", "x = 1\n# tvl-ignore-file\n").ignore_file);
-        assert!(!scan("a.py", "\n# tvl-ignore-file\nx = 1\n").ignore_file);
-        assert!(!scan("a.py", "#!/usr/bin/env python\n# tvl-ignore-file\n").ignore_file);
-        assert!(!scan("a.ts", "x; // tvl-ignore-file\n").ignore_file);
-        assert!(!scan("a.ts", "// see tvl-ignore-file\nx;\n").ignore_file);
-        assert!(!scan("a.py", "x = '# tvl-ignore-file'\n").ignore_file);
+        assert!(scan("a.py", "# tvlint-ignore-file\nx = 1\n").ignore_file);
+        assert!(scan("a.ts", "// tvlint-ignore-file\nx;\n").ignore_file);
+        assert!(scan("a.ts", "/* tvlint-ignore-file: generated */\nx;\n").ignore_file);
+        assert!(scan("a.ts", "\u{feff}// tvlint-ignore-file\nx;\n").ignore_file);
+        assert!(!scan("a.py", "x = 1\n# tvlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.py", "\n# tvlint-ignore-file\nx = 1\n").ignore_file);
+        assert!(!scan("a.py", "#!/usr/bin/env python\n# tvlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.ts", "x; // tvlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.ts", "// see tvlint-ignore-file\nx;\n").ignore_file);
+        assert!(!scan("a.py", "x = '# tvlint-ignore-file'\n").ignore_file);
     }
 
     #[test]
     fn ignore_file_does_not_hide_lines() {
-        assert!(hidden("a.py", "# tvl-ignore-file\nx = 1\ny = 2\n").is_empty());
+        assert!(hidden("a.py", "# tvlint-ignore-file\nx = 1\ny = 2\n").is_empty());
     }
 }

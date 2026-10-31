@@ -9,9 +9,9 @@ use crate::config::Rule;
 pub struct Summary {
     pub files_checked: usize,
     pub files_with_violations: usize,
-    /// Violations hidden by `tvl-ignore-next-line`.
+    /// Violations hidden by `tvlint-ignore-next-line`.
     pub suppressed: usize,
-    /// Files skipped by `tvl-ignore-file`.
+    /// Files skipped by `tvlint-ignore-file`.
     pub files_ignored: usize,
 }
 

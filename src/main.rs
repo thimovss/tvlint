@@ -280,10 +280,10 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
             // What was hidden stays visible in the summary, so suppressions can be audited.
             let mut notes = Vec::new();
             if suppressed > 0 {
-                notes.push(format!("{suppressed} hidden by tvl-ignore-next-line"));
+                notes.push(format!("{suppressed} hidden by tvlint-ignore-next-line"));
             }
             if ignored_in_scope > 0 {
-                notes.push(format!("{ignored_in_scope} file(s) skipped by tvl-ignore-file"));
+                notes.push(format!("{ignored_in_scope} file(s) skipped by tvlint-ignore-file"));
             }
             let notes = if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join(", ")) };
             if violations.is_empty() {
