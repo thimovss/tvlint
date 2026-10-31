@@ -1,0 +1,140 @@
+//! Inline suppression comments, the same in every language:
+//!
+//! - `prlint-ignore-next-line` hides every violation reported on the line after the comment.
+//! - `prlint-ignore-file`, as a comment on line 1, excludes the whole file.
+//!
+//! Directives are read from comment nodes in the syntax tree, so the same words inside a string
+//! are ignored. A directive may be followed by a reason: `// prlint-ignore-next-line: why`.
+
+use std::collections::HashSet;
+
+use crate::check::visit;
+use crate::source::SourceFile;
+
+const NEXT_LINE: &str = "prlint-ignore-next-line";
+const FILE: &str = "prlint-ignore-file";
+
+#[derive(Default)]
+pub struct Suppressions {
+    /// Line 1 holds a `prlint-ignore-file` comment.
+    pub ignore_file: bool,
+    /// 1-based lines whose violations are hidden.
+    next_lines: HashSet<usize>,
+}
+
+impl Suppressions {
+    pub fn scan(file: &SourceFile) -> Suppressions {
+        let mut found = Suppressions::default();
+        // Most files have no directive; skip walking the tree for them.
+        if !file.text.contains("prlint-ignore") {
+            return found;
+        }
+        let first_line_start = file.text.strip_prefix('\u{feff}').map_or(0, |_| '\u{feff}'.len_utf8());
+        visit(file.tree.root_node(), &mut |node| {
+            if node.kind() != "comment" {
+                return;
+            }
+            let Some(directive) = directive(&file.text[node.byte_range()]) else { return };
+            match directive {
+                FILE => {
+                    // Line 1, and nothing but whitespace before the comment.
+                    let before = &file.text[first_line_start..node.start_byte().max(first_line_start)];
+                    if node.start_position().row == 0 && before.trim().is_empty() {
+                        found.ignore_file = true;
+                    }
+                }
+                _ => {
+                    // The comment may be a block comment spanning lines: the next line is after its end.
+                    found.next_lines.insert(node.end_position().row + 2);
+                }
+            }
+        });
+        found
+    }
+
+    pub fn hides(&self, line: usize) -> bool {
+        self.next_lines.contains(&line)
+    }
+}
+
+/// Which directive a comment starts with, if any. The directive must be the first thing in the
+/// comment, so prose that merely mentions it does not count.
+fn directive(comment: &str) -> Option<&'static str> {
+    let body = comment
+        .trim()
+        .trim_start_matches(['#', '/', '*', '!'])
+        .trim_end_matches(['*', '/'])
+        .trim_start();
+    [NEXT_LINE, FILE].into_iter().find(|name| {
+        body.strip_prefix(name)
+            .is_some_and(|rest| !rest.starts_with(|c: char| c.is_alphanumeric() || c == '-' || c == '_'))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::Parsers;
+
+    fn scan(path: &str, text: &str) -> Suppressions {
+        let (language, tree) = Parsers::new().unwrap().parse(path, text).unwrap();
+        Suppressions::scan(&SourceFile { path: path.into(), language, text: text.into(), tree })
+    }
+
+    fn hidden(path: &str, text: &str) -> Vec<usize> {
+        let s = scan(path, text);
+        (1..=text.lines().count() + 1).filter(|l| s.hides(*l)).collect()
+    }
+
+    #[test]
+    fn next_line_comment_forms() {
+        assert_eq!(hidden("a.py", "x = 1\n# prlint-ignore-next-line\ny = 2\nz = 3\n"), [3]);
+        assert_eq!(hidden("a.ts", "a;\n// prlint-ignore-next-line\nb;\nc;\n"), [3]);
+        assert_eq!(hidden("a.ts", "a;\n/* prlint-ignore-next-line */\nb;\nc;\n"), [3]);
+        assert_eq!(hidden("a.tsx", "const a = (\n  <div>\n    {/* prlint-ignore-next-line */}\n    <button />\n  </div>\n);\n"), [4]);
+    }
+
+    #[test]
+    fn a_block_comment_hides_the_line_after_its_end() {
+        assert_eq!(hidden("a.ts", "a;\n/* prlint-ignore-next-line\n   because */\nb;\nc;\n"), [4]);
+    }
+
+    #[test]
+    fn a_reason_may_follow() {
+        assert_eq!(hidden("a.py", "# prlint-ignore-next-line: legacy endpoint\nx = 1\n"), [2]);
+        assert_eq!(hidden("a.ts", "// prlint-ignore-next-line - generated\nx;\n"), [2]);
+    }
+
+    #[test]
+    fn only_a_comment_that_starts_with_the_directive_counts() {
+        assert!(hidden("a.py", "x = 'prlint-ignore-next-line'\ny = 2\n").is_empty());
+        assert!(hidden("a.ts", "const s = '// prlint-ignore-next-line';\nx;\n").is_empty());
+        assert!(hidden("a.ts", "// we never write prlint-ignore-next-line here\nx;\n").is_empty());
+        assert!(hidden("a.py", "# prlint-ignore-next-lines\nx = 1\n").is_empty());
+        assert!(hidden("a.py", "# prlint-ignore-next-line-all\nx = 1\n").is_empty());
+    }
+
+    #[test]
+    fn a_trailing_comment_hides_the_next_line_not_its_own() {
+        assert_eq!(hidden("a.py", "x = 1  # prlint-ignore-next-line\ny = 2\n"), [2]);
+    }
+
+    #[test]
+    fn ignore_file_must_be_a_comment_on_line_one() {
+        assert!(scan("a.py", "# prlint-ignore-file\nx = 1\n").ignore_file);
+        assert!(scan("a.ts", "// prlint-ignore-file\nx;\n").ignore_file);
+        assert!(scan("a.ts", "/* prlint-ignore-file: generated */\nx;\n").ignore_file);
+        assert!(scan("a.ts", "\u{feff}// prlint-ignore-file\nx;\n").ignore_file);
+        assert!(!scan("a.py", "x = 1\n# prlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.py", "\n# prlint-ignore-file\nx = 1\n").ignore_file);
+        assert!(!scan("a.py", "#!/usr/bin/env python\n# prlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.ts", "x; // prlint-ignore-file\n").ignore_file);
+        assert!(!scan("a.ts", "// see prlint-ignore-file\nx;\n").ignore_file);
+        assert!(!scan("a.py", "x = '# prlint-ignore-file'\n").ignore_file);
+    }
+
+    #[test]
+    fn ignore_file_does_not_hide_lines() {
+        assert!(hidden("a.py", "# prlint-ignore-file\nx = 1\ny = 2\n").is_empty());
+    }
+}

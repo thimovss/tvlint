@@ -3,6 +3,7 @@ mod check;
 mod config;
 mod scope;
 mod source;
+mod suppress;
 mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +16,7 @@ use clap::{Parser, Subcommand};
 use check::{ClassIndex, CompiledRule, Project, Violation, check_file, check_filename};
 use config::Config;
 use scope::CompiledScope;
+use suppress::Suppressions;
 
 #[derive(Parser)]
 #[command(name = "prlint", version, about = "Enforce your team's code rules deterministically")]
@@ -88,7 +90,15 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     } else {
         None
     };
+    // The class hierarchy still includes files that opt out, so other files' results do not change.
     let index = ClassIndex::build(&files);
+    let suppressions: Vec<Suppressions> = files.iter().map(Suppressions::scan).collect();
+    let ignored: BTreeSet<&str> = files
+        .iter()
+        .zip(&suppressions)
+        .filter(|(_, s)| s.ignore_file)
+        .map(|(f, _)| f.path.as_str())
+        .collect();
     let all_paths = source::list_all(&root)?;
     let known_paths: std::collections::HashSet<String> = all_paths.iter().cloned().collect();
     let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths };
@@ -96,6 +106,9 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {
         if staged_paths.as_ref().is_some_and(|paths| !paths.contains(&file.path)) {
+            continue;
+        }
+        if suppressions[file_idx].ignore_file {
             continue;
         }
         for scope in scopes.iter().filter(|s| s.matches(&file.path)) {
@@ -110,19 +123,33 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
 
     let mut violations: Vec<Violation> = Vec::new();
     let mut checked: BTreeSet<&str> = BTreeSet::new();
+    let mut suppressed = 0;
     for (file_idx, id) in jobs {
         let file = &files[file_idx];
         checked.insert(file.path.as_str());
         if file.has_syntax_errors() {
             eprintln!("prlint: warning: {} has syntax errors, results may be incomplete", file.path);
         }
+        let before = violations.len();
         check_file(file, &rules[id], &ctx, &mut violations);
+        let mut hidden = 0;
+        let mut kept = violations.split_off(before);
+        kept.retain(|v| {
+            let hide = suppressions[file_idx].hides(v.line);
+            hidden += usize::from(hide);
+            !hide
+        });
+        suppressed += hidden;
+        violations.extend(kept);
     }
 
     // File-name rules look at every file, not only the ones we can parse.
     let mut name_jobs: BTreeSet<(&str, &str)> = BTreeSet::new();
     for path in &all_paths {
         if staged_paths.as_ref().is_some_and(|paths| !paths.contains(path)) {
+            continue;
+        }
+        if ignored.contains(path.as_str()) {
             continue;
         }
         for scope in scopes.iter().filter(|s| s.matches(path)) {
@@ -150,12 +177,28 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         println!("    why: {}", rule.rationale.trim());
         println!("    fix: {}", rule.fix.trim());
     }
+    // What was hidden stays visible in the summary, so suppressions can be audited.
+    let mut notes = Vec::new();
+    if suppressed > 0 {
+        notes.push(format!("{suppressed} hidden by prlint-ignore-next-line"));
+    }
+    let ignored_in_scope = ignored
+        .iter()
+        .filter(|p| staged_paths.as_ref().is_none_or(|s| s.contains(**p)))
+        .filter(|p| scopes.iter().any(|s| s.matches(p)))
+        .count();
+    if ignored_in_scope > 0 {
+        notes.push(format!("{ignored_in_scope} file(s) skipped by prlint-ignore-file"));
+    }
+    let notes = if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join(", ")) };
     if violations.is_empty() {
-        println!("prlint: no violations ({} files checked)", checked.len());
+        println!("prlint: no violations ({} files checked){notes}", checked.len());
     } else {
-        println!("prlint: {} violation(s) in {} file(s)", violations.len(), {
+        println!(
+            "prlint: {} violation(s) in {} file(s){notes}",
+            violations.len(),
             violations.iter().map(|v| &v.path).collect::<BTreeSet<_>>().len()
-        });
+        );
     }
     Ok(violations.len())
 }

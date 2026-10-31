@@ -312,7 +312,7 @@ pub fn check_file(
 }
 
 /// Depth-first walk over `node` and all its descendants.
-fn visit(node: Node, f: &mut impl FnMut(Node)) {
+pub fn visit(node: Node, f: &mut impl FnMut(Node)) {
     let mut cursor = node.walk();
     loop {
         f(cursor.node());

@@ -75,6 +75,36 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 
 Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called), so the rule keys mean the same thing everywhere.
 
+## Suppressing violations
+
+Two comments switch checks off. They work the same in Python, JavaScript and TypeScript, and are read from real comments, so the same words inside a string do nothing.
+
+| Comment | Effect |
+|---|---|
+| `prlint-ignore-next-line` | Hides every violation reported on the line directly after the comment. |
+| `prlint-ignore-file` | On line 1 of the file, excludes the whole file from every rule, file-name rules included. |
+
+```python
+# prlint-ignore-next-line: legacy endpoint, see ISSUE-123
+raise ValueError("not found")
+```
+
+```tsx
+{/* prlint-ignore-next-line */}
+<button onClick={open}>Open</button>
+```
+
+```ts
+// prlint-ignore-file: generated code
+```
+
+- Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX.
+- The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
+- **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # prlint-ignore-next-line`) hides the next line, not its own.
+- **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Only Python, JavaScript and TypeScript files can carry it.
+- An ignored file is still read to learn its classes, so other files' `forbid_catch` results do not change when a file opts out.
+- Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `prlint: 7 violation(s) in 4 file(s) [5 hidden by prlint-ignore-next-line, 3 file(s) skipped by prlint-ignore-file]`.
+
 ## Config
 
 Looking for rules to start from? See the [cookbook](cookbook/).
