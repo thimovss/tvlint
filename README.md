@@ -26,17 +26,33 @@ prlint [OPTIONS] [COMMAND]
 
 | Command | What it does |
 |---|---|
-| `check` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. |
+| `check [PATH]...` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. Pass files, directories or glob patterns to check only those (see below). |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |
 | `help [command]` | Prints help for prlint or for one command. |
 
+### Checking specific files
+
+`prlint check` takes any number of files, directories or glob patterns, relative to the directory you run it from. Without any, it checks the whole project.
+
+```bash
+prlint check src/api.ts                    # one file
+prlint check src/routes src/hooks          # directories: everything below them
+prlint check "src/**/*.test.ts"            # a glob: quote it so prlint expands it, not the shell
+prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root, as a pre-commit hook does
+```
+
+- A file is still only checked by the rules whose scope includes it. Passing a path narrows what runs, it never widens a scope.
+- Paths must be inside the project, the directory of the config file, and must exist, otherwise prlint exits with `2`. A glob that matches nothing is a warning on stderr. Files ignored by `.gitignore` are skipped, as always.
+- Everything is still parsed, so rules that follow imports or class hierarchies see the same project as in a full run, but only the selected files are reported on.
+- With `--staged`, a file must be both staged and selected.
+
 ### Flags
 
 | Flag | What it does |
 |---|---|
-| `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. |
+| `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. Combined with `PATH` arguments, a file must be both staged and selected. |
 | `-c, --config <path>` | Path to the config file. Defaults to `prlint.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |

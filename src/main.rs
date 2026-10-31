@@ -2,6 +2,7 @@ mod adapter;
 mod check;
 mod config;
 mod scope;
+mod select;
 mod source;
 mod suppress;
 mod validate;
@@ -34,7 +35,12 @@ struct Cli {
 enum Command {
     /// Check the project against all rules (exit 1 if any violation is found)
     Check {
-        /// Only check files staged in git (as they are in the index)
+        /// Files, directories or glob patterns to check, relative to the current directory.
+        /// Quote globs so prlint expands them (`"src/**/*.ts"`). Default: the whole project
+        #[arg(value_name = "PATH")]
+        paths: Vec<String>,
+        /// Only check files staged in git (as they are in the index). Combined with PATH, a
+        /// file must be both staged and selected
         #[arg(long)]
         staged: bool,
     },
@@ -51,8 +57,8 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command.unwrap_or(Command::Check { staged: false }) {
-        Command::Check { staged } => check(&cli.config, staged).map(|violations| u8::from(violations > 0)),
+    let result = match cli.command.unwrap_or(Command::Check { paths: Vec::new(), staged: false }) {
+        Command::Check { paths, staged } => check(&cli.config, &paths, staged).map(|violations| u8::from(violations > 0)),
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
         Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
@@ -67,12 +73,19 @@ fn main() -> ExitCode {
 }
 
 /// Returns the number of violations found.
-fn check(config_path: &Path, staged: bool) -> Result<usize> {
+fn check(config_path: &Path, paths: &[String], staged: bool) -> Result<usize> {
     let config = Config::load(config_path)?;
     let root = std::path::absolute(config_path)?
         .parent()
         .map(Path::to_path_buf)
         .context("config file has no parent directory")?;
+
+    let selection = if paths.is_empty() {
+        None
+    } else {
+        let cwd = std::env::current_dir().context("cannot determine current directory")?;
+        Some(select::Selection::new(paths, &root, &cwd)?)
+    };
 
     let rules = config
         .rules
@@ -92,6 +105,11 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     };
     // The class hierarchy still includes files that opt out, so other files' results do not change.
     let index = ClassIndex::build(&files);
+    // A file is checked when it is staged (if --staged) and selected by the PATH arguments (if any).
+    let selected = |path: &str| {
+        staged_paths.as_ref().is_none_or(|staged| staged.contains(path))
+            && selection.as_ref().is_none_or(|selection| selection.matches(path))
+    };
     let suppressions: Vec<Suppressions> = files.iter().map(Suppressions::scan).collect();
     let ignored: BTreeSet<&str> = files
         .iter()
@@ -100,12 +118,15 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         .map(|(f, _)| f.path.as_str())
         .collect();
     let all_paths = source::list_all(&root)?;
+    for unmatched in selection.iter().flat_map(|s| s.unmatched(&all_paths)) {
+        eprintln!("prlint: warning: `{unmatched}` matches no file (files ignored by .gitignore are skipped)");
+    }
     let known_paths: std::collections::HashSet<String> = all_paths.iter().cloned().collect();
     let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths };
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {
-        if staged_paths.as_ref().is_some_and(|paths| !paths.contains(&file.path)) {
+        if !selected(&file.path) {
             continue;
         }
         if suppressions[file_idx].ignore_file {
@@ -146,7 +167,7 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     // File-name rules look at every file, not only the ones we can parse.
     let mut name_jobs: BTreeSet<(&str, &str)> = BTreeSet::new();
     for path in &all_paths {
-        if staged_paths.as_ref().is_some_and(|paths| !paths.contains(path)) {
+        if !selected(path) {
             continue;
         }
         if ignored.contains(path.as_str()) {
@@ -184,7 +205,7 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
     }
     let ignored_in_scope = ignored
         .iter()
-        .filter(|p| staged_paths.as_ref().is_none_or(|s| s.contains(**p)))
+        .filter(|p| selected(p))
         .filter(|p| scopes.iter().any(|s| s.matches(p)))
         .count();
     if ignored_in_scope > 0 {
