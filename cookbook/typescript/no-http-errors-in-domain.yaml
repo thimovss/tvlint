@@ -1,0 +1,15 @@
+# Keep HTTP out of the domain layer
+# Domain code should not know it is served over HTTP. `throw new X(...)` names X.
+# Works for JavaScript and TypeScript; the exception names below are NestJS ones, so
+# replace them with your framework's.
+
+rules:
+  no-http-errors-in-domain:
+    language: [javascript, typescript]
+    forbid_raise: [HttpException, BadRequestException, NotFoundException, UnauthorizedException, ForbiddenException]
+    rationale: HTTP status codes are a transport concern. Domain code that throws them cannot be reused from a worker, a CLI or a queue consumer.
+    fix: Throw a domain error and let the API layer translate it into a response.
+
+scopes:
+  - rules: [no-http-errors-in-domain]
+    include: ["src/domain/**"]

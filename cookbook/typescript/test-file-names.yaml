@@ -1,0 +1,17 @@
+# Test directory files must be named *.test.ts(x) or *.spec.ts(x)
+# Every file under tests/ must be a test file. Anything else, such as helpers and data
+# files, is rejected. With no `language` set the rule applies to all file types.
+#
+# Adjust to your project:
+#   - add setup files, e.g. "setup.ts", to require_filename
+#   - exclude helper or fixture directories, e.g. exclude: ["tests/fixtures/**"]
+
+rules:
+  test-file-names:
+    require_filename: ["*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"]
+    rationale: The test runner only collects files that match its test pattern, so a test in a differently named file is silently never run.
+    fix: Rename the file to <name>.test.ts. Move shared helpers out of the tests directory.
+
+scopes:
+  - rules: [test-file-names]
+    include: ["tests/**"]

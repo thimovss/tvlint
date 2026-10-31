@@ -2,7 +2,7 @@
 
 Enforce your team's code rules deterministically. Rules live in a YAML file, violations come back with a reason and a fix so both humans and AI agents can act on them.
 
-Currently supports Python.
+Supports Python, JavaScript and TypeScript.
 
 ## Install
 
@@ -65,9 +65,19 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
     fix: Raise a ExampleException subclass. A new HTTP status needs a new subclass, not an inline response.
 ```
 
+## Languages
+
+| Language | Files |
+|---|---|
+| `python` | `.py` |
+| `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
+
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called), so the rule keys mean the same thing everywhere.
+
 ## Config
 
-Looking for rules to start from? See the [cookbook](cookbook/python/).
+Looking for rules to start from? See the [cookbook](cookbook/).
 
 `prlint.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
 
@@ -90,10 +100,10 @@ scopes:
 
 | Key | Meaning |
 |---|---|
-| `language` | Selects the parser, and limits the rule to files of that language. Only `python` for now. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
-| `forbid_raise` | Exception names that may not be raised. Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
-| `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()`. |
-| `forbid_catch` | `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
+| `language` | `python`, `javascript` or `typescript`, or a list such as `[javascript, typescript]`. Limits the rule to files of those languages. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
+| `forbid_raise` | Exception names that may not be raised (`throw` in JavaScript and TypeScript, where `throw new Foo()` names `Foo`). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
+| `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. Imports and aliases are not resolved. |
+| `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
 | `require_filename` | List of file name globs, matched against the file's base name only (not its directory). Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. Applies to all files in scope, not just parseable ones, so `data.json` or `helpers.py` in a `tests/` scope are flagged too. |
 | `rationale` | Required. Why the rule exists. Printed with every violation. |
 | `fix` | Required. How to comply. Printed with every violation. |

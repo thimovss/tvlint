@@ -1,0 +1,14 @@
+# No wall clock in tests
+# A test that reads the real clock depends on when it runs. `new Date()` is not listed
+# because it cannot be told apart from `new Date(2024, 0, 1)`, which is deterministic.
+
+rules:
+  no-wall-clock-in-tests:
+    language: [javascript, typescript]
+    forbid_call: [Date.now, performance.now]
+    rationale: Reading the real clock makes a test depend on when it runs, so it can fail at certain times and the failure cannot be reproduced.
+    fix: Use a fixed timestamp, or fake the clock with jest.useFakeTimers() or vi.useFakeTimers().
+
+scopes:
+  - rules: [no-wall-clock-in-tests]
+    include: ["tests/**", "**/*.test.*", "**/*.spec.*"]

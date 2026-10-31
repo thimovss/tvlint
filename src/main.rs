@@ -1,3 +1,4 @@
+mod adapter;
 mod check;
 mod config;
 mod scope;
@@ -97,7 +98,7 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
         for scope in scopes.iter().filter(|s| s.matches(&file.path)) {
             for id in scope.rules {
                 let rule = rules[id.as_str()].rule;
-                if rule.has_code_checks() && rule.language == Some(file.language) {
+                if rule.has_code_checks() && rule.applies_to(file.language) {
                     jobs.insert((file_idx, id.as_str()));
                 }
             }
@@ -128,7 +129,7 @@ fn check(config_path: &Path, staged: bool) -> Result<usize> {
                 if rule.require_filename.is_empty() {
                     continue;
                 }
-                if rule.language.is_some_and(|lang| source::language_of(Path::new(path)) != Some(lang)) {
+                if !rule.applies_to_path(path) {
                     continue;
                 }
                 name_jobs.insert((path.as_str(), id.as_str()));
@@ -164,7 +165,7 @@ fn explain(config_path: &Path, id: &str) -> Result<()> {
         let known: Vec<&str> = config.rules.keys().map(String::as_str).collect();
         bail!("unknown rule `{id}`; known rules: {}", known.join(", "));
     };
-    println!("{id} ({})\n", rule.language.map_or("any language", config::Language::name));
+    println!("{id} ({})\n", rule.language_label());
     println!("Why:  {}", rule.rationale.trim());
     println!("Fix:  {}\n", rule.fix.trim());
     println!("Forbids:");
@@ -199,8 +200,8 @@ fn list(config_path: &Path) -> Result<()> {
     let config = Config::load(config_path)?;
     let width = config.rules.keys().map(String::len).max().unwrap_or(0);
     for (id, rule) in &config.rules {
-        let scopes = config.scopes.iter().filter(|s| s.rules.contains(id)).count();
-        println!("{id:<width$}  {}  {scopes} scope(s)", rule.language.map_or("any language", config::Language::name));
+        let scope_count = config.scopes.iter().filter(|s| s.rules.contains(id)).count();
+        println!("{id:<width$}  {}  {scope_count} scope(s)", rule.language_label());
     }
     Ok(())
 }

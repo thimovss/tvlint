@@ -6,7 +6,7 @@ use globset::{Glob, GlobBuilder};
 use serde_yaml_ng::{Mapping, Value};
 
 use crate::check::ClassIndex;
-use crate::config::{Config, Language};
+use crate::config::Config;
 use crate::scope::CompiledScope;
 use crate::source;
 
@@ -15,10 +15,10 @@ const TOP_KEYS: &[(&str, &str)] = &[
     ("scopes", "list of entries that say which files each rule runs on"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
-    ("language", "the language the rule applies to, currently only `python`; required with forbid_* checks"),
-    ("forbid_raise", "list of exception names that must not be raised"),
+    ("language", "`python`, `javascript` or `typescript`, or a list of them; required with forbid_* checks"),
+    ("forbid_raise", "list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
     ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`"),
-    ("forbid_catch", "`subclass_of: Name` forbids catching Name or any class inheriting from it"),
+    ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
     ("require_filename", "list of file name globs; any matched file whose name matches none is a violation"),
     ("rationale", "required; why the rule exists, shown with every violation"),
     ("fix", "required; how to comply, shown with every violation"),
@@ -28,7 +28,7 @@ const SCOPE_KEYS: &[(&str, &str)] = &[
     ("include", "required; list of path globs relative to the config file's directory"),
     ("exclude", "optional; list of path globs to leave out"),
 ];
-const LANGUAGES: &[&str] = &["python"];
+const LANGUAGES: &[&str] = &["python", "javascript", "typescript"];
 
 struct Diagnostic {
     path: String,
@@ -124,7 +124,7 @@ fn check_against_project(
         for (i, scope) in scopes.iter().enumerate().filter(|(_, s)| s.rules.contains(id)) {
             let hits: Vec<&str> = all_paths
                 .iter()
-                .filter(|p| rule.language.is_none_or(|lang| source::language_of(Path::new(p)) == Some(lang)))
+                .filter(|p| rule.applies_to_path(p))
                 .filter(|p| scope.matches(p))
                 .map(String::as_str)
                 .collect();
@@ -133,7 +133,7 @@ fn check_against_project(
                     &format!("scopes[{i}]"),
                     format!(
                         "rule `{id}` matches no {}files here, so it has nothing to check",
-                        rule.language.map_or(String::new(), |l| format!("{} ", l.name()))
+                        if rule.language.is_empty() { String::new() } else { format!("{} ", rule.language_label()) }
                     ),
                     Some(format!(
                         "include/exclude globs are relative to {}; `*` stays in one directory, `**` crosses directories",
@@ -176,7 +176,7 @@ fn check_against_project(
         }
         summaries.push(RuleSummary {
             id: id.clone(),
-            language: rule.language.map_or("any language", Language::name).to_string(),
+            language: rule.language_label(),
             forbids,
             files: matched.len(),
             scopes: per_scope,
@@ -280,21 +280,18 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     check_keys(rule, path, RULE_KEYS, report);
 
     let has_code_checks = ["forbid_raise", "forbid_call", "forbid_catch"].iter().any(|k| rule.get(*k).is_some());
-    match rule.get("language") {
-        None if has_code_checks => report.error(
-            path,
-            "missing required key `language`",
-            Some(format!("add `language: {}`; it is required by forbid_raise, forbid_call and forbid_catch", LANGUAGES[0])),
-        ),
-        None => {}
-        Some(Value::String(lang)) if LANGUAGES.contains(&lang.as_str()) => {}
-        Some(Value::String(lang)) => report.error(
-            &format!("{path}.language"),
-            format!("unsupported language `{lang}`"),
-            Some(with_suggestion(lang, LANGUAGES.iter().copied(), &format!("supported languages: {}", LANGUAGES.join(", ")))),
-        ),
-        Some(other) => report.error(&format!("{path}.language"), format!("expected a string, found {}", describe(other)), None),
-    }
+    let languages = match rule.get("language") {
+        None if has_code_checks => {
+            report.error(
+                path,
+                "missing required key `language`",
+                Some(format!("add `language: {}`; it is required by forbid_raise, forbid_call and forbid_catch", LANGUAGES[0])),
+            );
+            Vec::new()
+        }
+        None => Vec::new(),
+        Some(value) => validate_languages(value, &format!("{path}.language"), report),
+    };
     for (key, hint) in [("rationale", "explain why the rule exists"), ("fix", "explain how to comply")] {
         match rule.get(key) {
             None => report.error(path, format!("missing required key `{key}`"), Some(format!("add `{key}:` to {hint}; it is returned with every violation"))),
@@ -328,6 +325,13 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     }
     if let Some(value) = rule.get("forbid_catch") {
         checks += 1;
+        if languages.iter().any(|l| l != "python") {
+            report.error(
+                &format!("{path}.forbid_catch"),
+                "forbid_catch is only supported for python",
+                Some("JavaScript and TypeScript catch clauses have no exception type; use `language: python` or remove forbid_catch".into()),
+            );
+        }
         let catch_path = format!("{path}.forbid_catch");
         if let Some(map) = expect_mapping(value, &catch_path, "a mapping like `{ subclass_of: SomeError }`", report) {
             check_keys(map, &catch_path, &[("subclass_of", "required; class name whose subclasses may not be caught")], report);
@@ -345,6 +349,32 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
             Some("add at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `require_filename`".into()),
         );
     }
+}
+
+/// `language: python` or `language: [javascript, typescript]`. Returns the valid names.
+fn validate_languages(value: &Value, path: &str, report: &mut Report) -> Vec<String> {
+    let names: Vec<(String, &Value)> = match value {
+        Value::Sequence(items) if items.is_empty() => {
+            report.error(path, "the list is empty", Some(format!("name at least one language: {}", LANGUAGES.join(", "))));
+            return Vec::new();
+        }
+        Value::Sequence(items) => items.iter().map(|v| (path.to_string(), v)).collect(),
+        other => vec![(path.to_string(), other)],
+    };
+    let mut valid = Vec::new();
+    for (i, (_, item)) in names.iter().enumerate() {
+        let at = if matches!(value, Value::Sequence(_)) { format!("{path}[{i}]") } else { path.to_string() };
+        match item {
+            Value::String(lang) if LANGUAGES.contains(&lang.as_str()) => valid.push(lang.clone()),
+            Value::String(lang) => report.error(
+                &at,
+                format!("unsupported language `{lang}`"),
+                Some(with_suggestion(lang, LANGUAGES.iter().copied(), &format!("supported languages: {}", LANGUAGES.join(", ")))),
+            ),
+            other => report.error(&at, format!("expected a language name, found {}", describe(other)), None),
+        }
+    }
+    valid
 }
 
 fn validate_scopes(scopes: &Value, rule_ids: &BTreeSet<String>, report: &mut Report) -> BTreeSet<String> {
@@ -568,6 +598,26 @@ scopes:
     fn code_checks_still_need_a_language() {
         let found = errors(&GOOD.replace("    language: python\n", ""));
         assert!(has(&found, "rules.no-http", "missing required key `language`"), "{found:?}");
+    }
+
+    #[test]
+    fn language_may_be_a_list() {
+        let yaml = GOOD.replace("language: python", "language: [javascript, typescript]");
+        assert!(errors(&yaml).is_empty(), "{:?}", errors(&yaml));
+        let found = errors(&GOOD.replace("language: python", "language: [typescript, typscript]"));
+        assert!(has(&found, "rules.no-http.language[1]", "unsupported language"), "{found:?}");
+    }
+
+    #[test]
+    fn forbid_catch_is_rejected_outside_python() {
+        let yaml = GOOD.replace("language: python", "language: typescript").replace(
+            "forbid_raise: [HTTPException]",
+            "forbid_catch: { subclass_of: AppError }",
+        );
+        let found = errors(&yaml);
+        assert!(has(&found, "rules.no-http.forbid_catch", "only supported for python"), "{found:?}");
+        let ok = GOOD.replace("forbid_raise: [HTTPException]", "forbid_catch: { subclass_of: AppError }");
+        assert!(errors(&ok).is_empty());
     }
 
     #[test]

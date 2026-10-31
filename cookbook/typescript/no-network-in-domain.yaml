@@ -1,0 +1,14 @@
+# No network calls in domain code
+# Domain logic that performs I/O is slow to test and fails for reasons unrelated to the
+# business rule. Both the bare call and the method forms are listed.
+
+rules:
+  no-network-in-domain:
+    language: [javascript, typescript]
+    forbid_call: [fetch, axios, "axios.*", "http.*", "https.*"]
+    rationale: Network calls inside domain code make it slow to test and tie business rules to infrastructure.
+    fix: Call the service from the application layer and pass the result into the domain code.
+
+scopes:
+  - rules: [no-network-in-domain]
+    include: ["src/domain/**"]

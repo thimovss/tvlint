@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use tree_sitter::Node;
 
+use crate::adapter::{self, last_segment};
 use crate::config::Rule;
 use crate::source::SourceFile;
 
@@ -57,19 +58,13 @@ impl ClassIndex {
     pub fn build(files: &[SourceFile]) -> ClassIndex {
         let mut index = ClassIndex::default();
         for file in files {
+            let adapter = adapter::for_language(file.language);
+            if !adapter.indexes_classes() {
+                continue;
+            }
             visit(file.tree.root_node(), &mut |node| {
-                if node.kind() != "class_definition" {
-                    return;
-                }
-                let Some(name) = node.child_by_field_name("name") else { return };
-                let entry = index.bases.entry(text(name, &file.text).to_string()).or_default();
-                if let Some(supers) = node.child_by_field_name("superclasses") {
-                    let mut cursor = supers.walk();
-                    for base in supers.named_children(&mut cursor) {
-                        if let Some(dotted) = dotted_name(base, &file.text) {
-                            entry.insert(last_segment(&dotted).to_string());
-                        }
-                    }
+                if let Some((name, bases)) = adapter.class_bases(node, &file.text) {
+                    index.bases.entry(name).or_default().extend(bases);
                 }
             });
         }
@@ -124,6 +119,7 @@ pub fn check_file(
     index: &ClassIndex,
     out: &mut Vec<Violation>,
 ) {
+    let adapter = adapter::for_language(file.language);
     let catch_classes = rule.catch_root.map(|root| (root, index.subclasses_of(root)));
     let src = file.text.as_str();
     let mut report = |node: Node, message: String| {
@@ -137,112 +133,29 @@ pub fn check_file(
         });
     };
 
-    visit(file.tree.root_node(), &mut |node| match node.kind() {
-        "raise_statement" if !rule.raise.is_empty() => {
-            if let Some(name) = raised_name(node, src)
-                && (rule.raise.is_match(&name) || rule.raise.is_match(last_segment(&name)))
-            {
-                report(node, format!("raising `{name}` is forbidden"));
-            }
+    visit(file.tree.root_node(), &mut |node| {
+        if !rule.raise.is_empty()
+            && let Some(name) = adapter.raised_name(node, src)
+            && (rule.raise.is_match(&name) || rule.raise.is_match(last_segment(&name)))
+        {
+            report(node, format!("raising `{name}` is forbidden"));
         }
-        "call" if !rule.call.is_empty() => {
-            if let Some(function) = node.child_by_field_name("function") {
-                let name = callee_name(function, src);
-                if rule.call.is_match(&name) {
-                    report(node, format!("calling `{name}` is forbidden"));
+        if !rule.call.is_empty()
+            && let Some(name) = adapter.call_name(node, src)
+            && rule.call.is_match(&name)
+        {
+            report(node, format!("calling `{name}` is forbidden"));
+        }
+        if let Some((root, classes)) = &catch_classes
+            && let Some(caught) = adapter.caught_types(node, src)
+        {
+            for name in caught {
+                if classes.contains(last_segment(&name)) {
+                    report(node, format!("catching `{name}` ({root} or a subclass) is forbidden"));
                 }
             }
         }
-        "except_clause" | "except_group_clause" => {
-            if let Some((root, classes)) = &catch_classes {
-                for caught in caught_types(node, src) {
-                    if classes.contains(last_segment(&caught)) {
-                        report(node, format!("catching `{caught}` ({root} or a subclass) is forbidden"));
-                    }
-                }
-            }
-        }
-        _ => {}
     });
-}
-
-/// Name of the exception in `raise Foo(...)`, `raise Foo` or `raise mod.Foo(...) from e`.
-fn raised_name(raise: Node, src: &str) -> Option<String> {
-    let cause = raise.child_by_field_name("cause").map(|n| n.id());
-    let mut cursor = raise.walk();
-    let expr = raise
-        .named_children(&mut cursor)
-        .find(|n| n.kind() != "comment" && Some(n.id()) != cause)?;
-    let target = if expr.kind() == "call" { expr.child_by_field_name("function")? } else { expr };
-    dotted_name(target, src)
-}
-
-/// The exception types of an `except` clause, flattening `except (A, B) as e`.
-fn caught_types(clause: Node, src: &str) -> Vec<String> {
-    let mut cursor = clause.walk();
-    let Some(mut first) = clause
-        .named_children(&mut cursor)
-        .find(|n| !matches!(n.kind(), "block" | "comment"))
-    else {
-        return Vec::new();
-    };
-    if first.kind() == "as_pattern" {
-        let Some(inner) = first.named_child(0) else { return Vec::new() };
-        first = inner;
-    }
-    let mut names = Vec::new();
-    if matches!(first.kind(), "tuple" | "parenthesized_expression" | "expression_list") {
-        let mut cursor = first.walk();
-        for item in first.named_children(&mut cursor) {
-            names.extend(dotted_name(item, src));
-        }
-    } else {
-        names.extend(dotted_name(first, src));
-    }
-    names
-}
-
-/// `a.b.c` for plain identifier/attribute chains, otherwise `None`.
-fn dotted_name(node: Node, src: &str) -> Option<String> {
-    match node.kind() {
-        "identifier" => Some(text(node, src).to_string()),
-        "attribute" => {
-            let object = dotted_name(node.child_by_field_name("object")?, src)?;
-            let attr = text(node.child_by_field_name("attribute")?, src);
-            Some(format!("{object}.{attr}"))
-        }
-        _ => None,
-    }
-}
-
-/// Like `dotted_name` but total: calls render as `f()` and anything else as `?`,
-/// so `session.exec(q).one` becomes `session.exec().one`.
-fn callee_name(node: Node, src: &str) -> String {
-    match node.kind() {
-        "identifier" => text(node, src).to_string(),
-        "attribute" => {
-            let object = node
-                .child_by_field_name("object")
-                .map_or_else(|| "?".to_string(), |o| callee_name(o, src));
-            let attr = node.child_by_field_name("attribute").map_or("?", |a| text(a, src));
-            format!("{object}.{attr}")
-        }
-        "call" => {
-            let function = node
-                .child_by_field_name("function")
-                .map_or_else(|| "?".to_string(), |f| callee_name(f, src));
-            format!("{function}()")
-        }
-        _ => "?".to_string(),
-    }
-}
-
-fn last_segment(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
-fn text<'a>(node: Node, src: &'a str) -> &'a str {
-    &src[node.byte_range()]
 }
 
 /// Depth-first walk over `node` and all its descendants.
@@ -268,33 +181,32 @@ fn visit(node: Node, f: &mut impl FnMut(Node)) {
 mod tests {
     use super::*;
     use crate::config::{ClassSelector, Language};
-    use tree_sitter::Parser;
+    use crate::source::Parsers;
 
-    fn parse(text: &str) -> SourceFile {
-        let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
-        SourceFile {
-            path: "t.py".into(),
-            language: Language::Python,
-            text: text.into(),
-            tree: parser.parse(text, None).unwrap(),
-        }
+    fn parse(path: &str, text: &str) -> SourceFile {
+        let (language, tree) = Parsers::new().unwrap().parse(path, text).unwrap();
+        SourceFile { path: path.into(), language, text: text.into(), tree }
     }
 
-    fn rule(raise: &[&str], call: &[&str], catch: Option<&str>) -> Rule {
+    fn rule(language: Language, raise: &[&str], call: &[&str], catch: Option<&str>) -> Rule {
         Rule {
-            language: Some(Language::Python),
-            require_filename: Vec::new(),
+            language: vec![language],
             forbid_raise: raise.iter().map(|s| s.to_string()).collect(),
             forbid_call: call.iter().map(|s| s.to_string()).collect(),
             forbid_catch: catch.map(|c| ClassSelector { subclass_of: c.into() }),
+            require_filename: Vec::new(),
             rationale: String::new(),
             fix: String::new(),
         }
     }
 
-    fn run(source: &str, rule: &Rule) -> Vec<(usize, String)> {
-        let file = parse(source);
+    /// Lines (1-based) of every violation of `rule` in `source`, parsed as the file `path`.
+    fn lines(path: &str, source: &str, rule: &Rule) -> Vec<usize> {
+        hits(path, source, rule).into_iter().map(|h| h.0).collect()
+    }
+
+    fn hits(path: &str, source: &str, rule: &Rule) -> Vec<(usize, String)> {
+        let file = parse(path, source);
         let index = ClassIndex::build(std::slice::from_ref(&file));
         let compiled = CompiledRule::new("r", rule).unwrap();
         let mut out = Vec::new();
@@ -302,33 +214,102 @@ mod tests {
         out.into_iter().map(|v| (v.line, v.message)).collect()
     }
 
+    // ---- Python
+
     #[test]
     fn flags_raise_forms_but_not_bare_reraise() {
         let src = "raise ValueError('x')\nraise ValueError\nraise errors.ValueError() from e\ntry:\n    pass\nexcept Exception:\n    raise\nraise Other()\n";
-        let hits = run(src, &rule(&["ValueError"], &[], None));
-        assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), [1, 2, 3]);
+        let r = rule(Language::Python, &["ValueError"], &[], None);
+        assert_eq!(lines("t.py", src, &r), [1, 2, 3]);
     }
 
     #[test]
     fn flags_method_call_on_chain() {
         let src = "x = session.exec(stmt).one()\ny = session.exec(stmt).first()\nz = one()\n";
-        let hits = run(src, &rule(&[], &["*.one"], None));
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].0, 1);
+        let r = rule(Language::Python, &[], &["*.one"], None);
+        assert_eq!(lines("t.py", src, &r), [1]);
     }
 
     #[test]
     fn flags_catch_of_transitive_subclass() {
         let src = "class ExampleException(Exception): pass\nclass Mid(ExampleException): pass\nclass Leaf(Mid): pass\n\
 try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, mod.Mid):\n    pass\ntry:\n    pass\nexcept KeyError:\n    pass\n";
-        let hits = run(src, &rule(&[], &[], Some("ExampleException")));
-        assert_eq!(hits.iter().map(|h| h.0).collect::<Vec<_>>(), [6, 10]);
+        let r = rule(Language::Python, &[], &[], Some("ExampleException"));
+        assert_eq!(lines("t.py", src, &r), [6, 10]);
     }
+
+    #[test]
+    fn parses_pep695_class_syntax() {
+        let file = parse("t.py", "class DomainEvent[T](BaseModel, ABC):\n    pass\n");
+        assert!(!file.has_syntax_errors());
+        let index = ClassIndex::build(std::slice::from_ref(&file));
+        assert!(index.subclasses_of("BaseModel").contains("DomainEvent"));
+    }
+
+    // ---- JavaScript and TypeScript
+
+    #[test]
+    fn js_flags_throw_forms() {
+        let src = "throw new HttpError('x');\nthrow new errors.HttpError('x');\nthrow HttpError('x');\nthrow err;\nthrow new Other();\n";
+        let r = rule(Language::JavaScript, &["HttpError"], &[], None);
+        assert_eq!(lines("t.js", src, &r), [1, 2, 3]);
+    }
+
+    #[test]
+    fn js_flags_calls_and_constructors() {
+        let src = "console.log(1);\nconst t = Date.now();\nconst d = new Date();\nlog(1);\nMath.random();\n";
+        let r = rule(Language::JavaScript, &[], &["console.*", "Date.now", "Date", "Math.random"], None);
+        assert_eq!(lines("t.js", src, &r), [1, 2, 3, 5]);
+    }
+
+    #[test]
+    fn js_sees_through_chains_and_wrappers() {
+        let src = "db.query(sql).one();\nnew Date().getTime();\n(x as any).save();\ny!.save();\n(z).save();\n";
+        let r = rule(Language::TypeScript, &[], &["*.one", "new Date().getTime", "x.save", "y.save", "z.save"], None);
+        assert_eq!(lines("t.ts", src, &r), [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn ts_parses_types_generics_and_decorators() {
+        let src = "@Injectable()\nclass A<T extends object> implements I {\n  constructor(private readonly s: Svc) {}\n  run(x: T): Promise<void> { throw new BadRequestException('x'); }\n}\ninterface I { run(x: unknown): void }\n";
+        let file = parse("a.ts", src);
+        assert!(!file.has_syntax_errors());
+        let r = rule(Language::TypeScript, &["BadRequestException"], &[], None);
+        assert_eq!(lines("a.ts", src, &r), [4]);
+    }
+
+    #[test]
+    fn tsx_and_jsx_parse() {
+        let tsx = "const A = (p: { n: number }) => <div onClick={() => track('a')}>{p.n}</div>;\n";
+        let jsx = "const A = (p) => <div onClick={() => track('a')}>{p.n}</div>;\n";
+        assert!(!parse("a.tsx", tsx).has_syntax_errors());
+        assert!(!parse("a.jsx", jsx).has_syntax_errors());
+        let r = rule(Language::TypeScript, &[], &["track"], None);
+        assert_eq!(lines("a.tsx", tsx, &r), [1]);
+    }
+
+    #[test]
+    fn extensions_map_to_languages() {
+        for (path, language) in [
+            ("a.py", Language::Python),
+            ("a.js", Language::JavaScript),
+            ("a.mjs", Language::JavaScript),
+            ("a.cjs", Language::JavaScript),
+            ("a.jsx", Language::JavaScript),
+            ("a.ts", Language::TypeScript),
+            ("a.tsx", Language::TypeScript),
+            ("a.mts", Language::TypeScript),
+        ] {
+            assert_eq!(parse(path, "").language, language, "{path}");
+        }
+    }
+
+    // ---- file names
 
     #[test]
     fn filename_rule_matches_on_the_base_name_only() {
         let rule = Rule {
-            language: None,
+            language: Vec::new(),
             forbid_raise: Vec::new(),
             forbid_call: Vec::new(),
             forbid_catch: None,
@@ -343,13 +324,5 @@ try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, m
         assert!(hit.message.contains("`helpers.py`"));
         assert!(check_filename("tests/data.json", &compiled).is_some());
         assert!(check_filename("tests/mytest_x.py", &compiled).is_some());
-    }
-
-    #[test]
-    fn parses_pep695_class_syntax() {
-        let file = parse("class DomainEvent[T](BaseModel, ABC):\n    pass\n");
-        assert!(!file.has_syntax_errors());
-        let index = ClassIndex::build(std::slice::from_ref(&file));
-        assert!(index.subclasses_of("BaseModel").contains("DomainEvent"));
     }
 }

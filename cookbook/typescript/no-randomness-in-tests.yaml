@@ -1,0 +1,14 @@
+# No randomness in tests
+# Random values make a test pass or fail by chance, and a failure cannot be reproduced
+# because the input is gone.
+
+rules:
+  no-randomness-in-tests:
+    language: [javascript, typescript]
+    forbid_call: [Math.random, crypto.randomUUID, crypto.getRandomValues, uuidv4, uuid.v4]
+    rationale: Unseeded randomness makes tests flaky, and a failure cannot be reproduced.
+    fix: Use fixed values or a factory with a fixed seed.
+
+scopes:
+  - rules: [no-randomness-in-tests]
+    include: ["tests/**", "**/*.test.*", "**/*.spec.*"]

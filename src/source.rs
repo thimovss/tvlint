@@ -22,19 +22,41 @@ impl SourceFile {
     }
 }
 
-pub fn language_of(path: &Path) -> Option<Language> {
-    match path.extension()?.to_str()? {
-        "py" => Some(Language::Python),
-        _ => None,
-    }
+/// One tree-sitter parser per grammar. TSX needs its own grammar, so `.tsx` is told apart by extension.
+pub struct Parsers {
+    python: Parser,
+    javascript: Parser,
+    typescript: Parser,
+    tsx: Parser,
 }
 
-fn python_parser() -> Result<Parser> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_python::LANGUAGE.into())
-        .map_err(|e| anyhow!("cannot load python grammar: {e}"))?;
-    Ok(parser)
+impl Parsers {
+    pub fn new() -> Result<Parsers> {
+        fn parser(name: &str, language: tree_sitter::Language) -> Result<Parser> {
+            let mut parser = Parser::new();
+            parser.set_language(&language).map_err(|e| anyhow!("cannot load {name} grammar: {e}"))?;
+            Ok(parser)
+        }
+        Ok(Parsers {
+            python: parser("python", tree_sitter_python::LANGUAGE.into())?,
+            javascript: parser("javascript", tree_sitter_javascript::LANGUAGE.into())?,
+            typescript: parser("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())?,
+            tsx: parser("tsx", tree_sitter_typescript::LANGUAGE_TSX.into())?,
+        })
+    }
+
+    /// Parses `text` with the grammar for `path`'s extension. `None` for unsupported files.
+    pub fn parse(&mut self, path: &str, text: &str) -> Option<(Language, Tree)> {
+        let path = Path::new(path);
+        let language = Language::from_path(path)?;
+        let parser = match language {
+            Language::Python => &mut self.python,
+            Language::JavaScript => &mut self.javascript,
+            Language::TypeScript if path.extension().is_some_and(|e| e == "tsx") => &mut self.tsx,
+            Language::TypeScript => &mut self.typescript,
+        };
+        parser.parse(text, None).map(|tree| (language, tree))
+    }
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -67,11 +89,11 @@ pub fn staged_paths(root: &Path) -> Result<BTreeSet<String>> {
 /// Replaces the working-tree contents of staged files with what is in the index,
 /// so unstaged edits to a staged file are not checked.
 pub fn use_index_contents(files: &mut [SourceFile], staged: &BTreeSet<String>, root: &Path) -> Result<()> {
-    let mut parser = python_parser()?;
+    let mut parsers = Parsers::new()?;
     for file in files.iter_mut().filter(|f| staged.contains(&f.path)) {
         let blob = git(root, &["show", &format!(":./{}", file.path)])?;
         let Ok(text) = String::from_utf8(blob) else { continue };
-        let Some(tree) = parser.parse(&text, None) else { continue };
+        let Some((_, tree)) = parsers.parse(&file.path, &text) else { continue };
         file.text = text;
         file.tree = tree;
     }
@@ -95,7 +117,7 @@ pub fn list_all(root: &Path) -> Result<Vec<String>> {
 
 /// Finds and parses every supported source file under `root`, honouring `.gitignore`.
 pub fn load_all(root: &Path) -> Result<Vec<SourceFile>> {
-    let mut parser = python_parser()?;
+    let mut parsers = Parsers::new()?;
 
     let mut files = Vec::new();
     for entry in WalkBuilder::new(root).build() {
@@ -104,16 +126,13 @@ pub fn load_all(root: &Path) -> Result<Vec<SourceFile>> {
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
-        let Some(language) = language_of(path) else { continue };
+        if Language::from_path(path).is_none() {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(path) else { continue };
-        let Some(tree) = parser.parse(&text, None) else { continue };
-        let relative = path.strip_prefix(root).unwrap_or(path);
-        files.push(SourceFile {
-            path: relative.to_string_lossy().replace('\\', "/"),
-            language,
-            text,
-            tree,
-        });
+        let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        let Some((language, tree)) = parsers.parse(&relative, &text) else { continue };
+        files.push(SourceFile { path: relative, language, text, tree });
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
