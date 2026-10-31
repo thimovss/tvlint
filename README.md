@@ -291,4 +291,4 @@ A rule that appears in no scope never runs. Files ignored by `.gitignore` are sk
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); contributors sign a [CLA](CLA.md) so the maintainer can also offer prlint under other terms.
