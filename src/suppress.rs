@@ -110,6 +110,13 @@ mod tests {
     }
 
     #[test]
+    fn shell_comments() {
+        assert_eq!(hidden("a.sh", "#!/bin/sh\n# tvlint-ignore-next-line: ok\nrm -rf x\nrm -rf y\n"), [3]);
+        assert!(scan("a.sh", "# tvlint-ignore-file\nls\n").ignore_file);
+        assert!(hidden("a.sh", "echo \"# tvlint-ignore-next-line\"\nls\n").is_empty());
+    }
+
+    #[test]
     fn html_comments() {
         assert_eq!(hidden("a.html", "<!-- tvlint-ignore-next-line: legacy -->\n<font>x</font>\n<font>y</font>\n"), [2]);
         assert_eq!(hidden("a.html", "<p>\n<!--tvlint-ignore-next-line-->\n<font>x</font>\n</p>\n"), [3]);

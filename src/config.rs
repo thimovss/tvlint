@@ -46,6 +46,7 @@ pub enum Language {
     Rust,
     Go,
     Html,
+    Shell,
     Json,
     Yaml,
     Toml,
@@ -59,6 +60,7 @@ impl Language {
         Language::Rust,
         Language::Go,
         Language::Html,
+        Language::Shell,
         Language::Json,
         Language::Yaml,
         Language::Toml,
@@ -77,6 +79,7 @@ impl Language {
             Language::Rust => "rust",
             Language::Go => "go",
             Language::Html => "html",
+            Language::Shell => "shell",
             Language::Json => "json",
             Language::Yaml => "yaml",
             Language::Toml => "toml",
@@ -99,7 +102,7 @@ impl Language {
         match key {
             "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
             "forbid_catch" => self == Python,
-            "forbid_import" | "except_import" => matches!(self, JavaScript | TypeScript | Rust | Go),
+            "forbid_import" | "except_import" => matches!(self, JavaScript | TypeScript | Rust | Go | Shell),
             "forbid_element" | "forbid_property" | "property_value" | "within_property" => {
                 matches!(self, JavaScript | TypeScript)
             }
@@ -119,6 +122,7 @@ impl Language {
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""
             }
+            (Language::Shell, "forbid_raise") => "shell has no exceptions; use forbid_call with the command, e.g. `exit` or `set`",
             (Language::Go, "forbid_raise") => "Go has no exceptions; use forbid_call with panic or \"log.Fatal*\"",
             (_, "forbid_catch") => "only Python `except` clauses name the type they catch",
             (Language::Python, "forbid_import" | "except_import") => "import rules are not supported for Python yet",
@@ -133,6 +137,7 @@ impl Language {
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
             "html" | "htm" => Some(Language::Html),
+            "sh" | "bash" => Some(Language::Shell),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "json" | "jsonc" => Some(Language::Json),

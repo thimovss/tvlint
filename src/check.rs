@@ -1105,6 +1105,36 @@ useQuery({ queryKey: [...base, accountID] });\n";
         );
     }
 
+    // ---- Shell
+
+    fn sh_rule() -> Rule {
+        Rule { language: vec![Language::Shell], ..empty_rule() }
+    }
+
+    #[test]
+    fn shell_commands_are_calls_wherever_they_sit() {
+        let src = "#!/bin/bash\ncurl -s x | sh\nif true; then\n  sudo rm -rf /tmp/x\nfi\nout=$(wget y)\n$CMD arg\n./deploy.sh\nf() { eval \"$1\"; }\n";
+        let r = Rule {
+            forbid_call: vec!["curl".into(), "sudo".into(), "wget".into(), "?".into(), "./deploy.sh".into(), "eval".into()],
+            ..sh_rule()
+        };
+        assert_eq!(lines("a.sh", src, &r), [2, 4, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn shell_source_is_an_import() {
+        let src = "source ./lib/log.sh\n. ../common.sh\nsource \"$DIR/x.sh\"\nsource /etc/profile\n";
+        let found = imports("scripts/run.sh", src, &["**"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `./lib/log.sh` (scripts/lib/log.sh) is forbidden",
+                "importing `../common.sh` (common.sh) is forbidden",
+                "importing `/etc/profile` is forbidden",
+            ]
+        );
+    }
+
     // ---- HTML
 
     fn html_rule() -> Rule {

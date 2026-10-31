@@ -106,11 +106,12 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `rust` | `.rs` |
 | `go` | `.go` |
 | `html` | `.html`, `.htm` |
+| `shell` | `.sh`, `.bash` |
 | `json` | `.json`, `.jsonc` |
 | `yaml` | `.yaml`, `.yml` |
 | `toml` | `.toml` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have object-literal checks. HTML is markup, so it has no calls or imports: it supports `forbid_element` (tag names, case-insensitive), `forbid_property` (attribute names) and `property_value` with `forbid_literal` (attributes that carry a value), plus `require_filename`. Code inside `<script>` and `<style>` is not parsed. `tvl validate` says so when a rule asks a language for something it cannot do.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have object-literal checks. HTML is markup, so it has no calls or imports: it supports `forbid_element` (tag names, case-insensitive), `forbid_property` (attribute names) and `property_value` with `forbid_literal` (attributes that carry a value), plus `require_filename`. Code inside `<script>` and `<style>` is not parsed. Shell scripts have commands and `source`: `forbid_call` matches the command name as written (`curl`, `sudo`, `./deploy.sh`; a name built from an expansion such as `$CMD` is `?`), `forbid_import` matches the file given to `source` or `.`, and `literal_argument` reads a command's words. Only bare and quoted words without expansions have a value; shell has no `forbid_raise`. `tvl validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 
@@ -174,10 +175,10 @@ raise ValueError("not found")
 // tvlint-ignore-file: generated code
 ```
 
-- Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX; `<!-- -->` in HTML.
+- Use the comment style of the language: `#` in Python and shell; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX; `<!-- -->` in HTML.
 - The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
 - **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvlint-ignore-next-line`) hides the next line, not its own.
-- **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Only Python, JavaScript and TypeScript files can carry it.
+- **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Every language can carry it, but a shell script's shebang already takes line 1, so use `tvlint-ignore-next-line` there.
 - An ignored file is still read to learn its classes, so other files' `forbid_catch` results do not change when a file opts out.
 - Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `tvl: 7 violation(s) in 4 file(s) [5 hidden by tvlint-ignore-next-line, 3 file(s) skipped by tvlint-ignore-file]`.
 
