@@ -104,11 +104,12 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
 | `rust` | `.rs` |
+| `go` | `.go` |
 | `json` | `.json`, `.jsonc` |
 | `yaml` | `.yaml`, `.yml` |
 | `toml` | `.toml` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `tvl validate` says so when a rule asks a language for something it cannot do.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust and Go have no exceptions, so they have no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `tvl validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 

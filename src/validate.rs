@@ -17,19 +17,19 @@ const TOP_KEYS: &[(&str, &str)] = &[
     ("aliases", "optional; import prefix to project path, e.g. `\"@/\": \"src/\"`"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
-    ("language", "`python`, `javascript`, `typescript`, `rust`, `json`, `yaml` or `toml`, or a list of them; required with every check except require_filename. Data languages cannot be mixed with code languages"),
+    ("language", "`python`, `javascript`, `typescript`, `rust`, `go`, `json`, `yaml` or `toml`, or a list of them; required with every check except require_filename. Data languages cannot be mixed with code languages"),
     ("forbid_raise", "Python, JS/TS; list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
-    ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`; Rust macros end in `!`"),
+    ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`; Rust macros end in `!`; Go calls look like `fmt.Println`"),
     ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
-    ("forbid_import", "JS/TS and Rust; module specifiers that must not be imported; relative and aliased imports match by project path"),
-    ("except_import", "JS/TS and Rust; imports that are fine although they match forbid_import"),
+    ("forbid_import", "JS/TS, Rust and Go; module specifiers that must not be imported; relative and aliased imports match by project path"),
+    ("except_import", "JS/TS, Rust and Go; imports that are fine although they match forbid_import"),
     ("forbid_element", "JS/TS; JSX element names that must not be used, e.g. `button`"),
     ("forbid_property", "JS/TS: object-literal property names that must not appear. JSON/YAML/TOML: key paths that must not exist, e.g. `scripts.postinstall`, `jobs.*.permissions`, `**.debug`"),
     ("property_value", "JS/TS: `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`. JSON/YAML/TOML: `names` (key paths) plus `forbid_value` and/or `require_value` (globs on the value)"),
     ("require_property", "JSON/YAML/TOML; key paths that must exist, e.g. `jobs.*.timeout-minutes`: every match of the parent path needs the key"),
     ("same_keys_as", "JSON/YAML/TOML; path of a reference file whose keys every matched file must have, no more and no fewer"),
     ("same_placeholders", "JSON/YAML/TOML; true: shared messages must also use the same `{{placeholders}}` as the same_keys_as file"),
-    ("literal_argument", "Python, JS/TS, Rust; `calls`, `position` and a `registry` (file, path, use): string literals passed to those calls must be listed in a data file; `report_unused: true` also reports entries nothing uses"),
+    ("literal_argument", "Python, JS/TS, Rust, Go; `calls`, `position` and a `registry` (file, path, use): string literals passed to those calls must be listed in a data file; `report_unused: true` also reports entries nothing uses"),
     ("within_property", "JS/TS; only count call, raise and element hits inside a property with one of these names"),
     ("require_filename", "list of file name globs; any matched file whose name matches none is a violation"),
     ("rationale", "required; why the rule exists, shown with every violation"),
@@ -40,7 +40,7 @@ const SCOPE_KEYS: &[(&str, &str)] = &[
     ("include", "required; list of path globs relative to the config file's directory"),
     ("exclude", "optional; list of path globs to leave out"),
 ];
-const LANGUAGES: &[&str] = &["python", "javascript", "typescript", "rust", "json", "yaml", "toml"];
+const LANGUAGES: &[&str] = &["python", "javascript", "typescript", "rust", "go", "json", "yaml", "toml"];
 
 struct Diagnostic {
     path: String,
@@ -1122,6 +1122,19 @@ scopes:
         let mixed = errors(&ES_RULE.replace("language: typescript", "language: [typescript, rust]").replace("    fix: how\n", "    fix: how\n    forbid_raise: [E]\n"));
         assert!(has(&mixed, "rules.r.forbid_raise", "not supported for rust"), "{mixed:?}");
         assert!(!has(&mixed, "rules.r.forbid_raise", "not supported for typescript"), "{mixed:?}");
+    }
+
+    #[test]
+    fn go_accepts_calls_and_imports_but_has_no_exceptions() {
+        let go = |extra: &str| {
+            errors(&ES_RULE.replace("language: typescript", "language: go").replace("    fix: how\n", &format!("    fix: how\n{extra}")))
+        };
+        assert!(go("    forbid_call: [\"fmt.Println\", panic]\n").is_empty());
+        assert!(go("    forbid_import: [\"app/internal/db\"]\n").is_empty());
+        let found = go("    forbid_raise: [Error]\n");
+        assert!(has(&found, "rules.r.forbid_raise", "not supported for go"), "{found:?}");
+        let found = go("    forbid_element: [button]\n");
+        assert!(has(&found, "rules.r.forbid_element", "not supported for go"), "{found:?}");
     }
 
     fn schema_keys(node: &Value) -> BTreeSet<String> {

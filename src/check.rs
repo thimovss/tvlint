@@ -1075,6 +1075,36 @@ useQuery({ queryKey: [...base, accountID] });\n";
         assert_eq!(hits("a.rs", src, &r).len(), 1);
     }
 
+    // ---- Go
+
+    fn go_rule() -> Rule {
+        Rule { language: vec![Language::Go], ..empty_rule() }
+    }
+
+    #[test]
+    fn go_calls_cover_functions_methods_and_builtins() {
+        let src = "package main\n\nfunc f() {\n\tfmt.Println(\"hi\")\n\tdb.Query(q).Scan(&x)\n\tpanic(\"no\")\n\tlog.Fatalf(\"x\")\n\tmap_[int](1)\n\tslices.Sort[int](x)\n}\n";
+        let r = Rule {
+            forbid_call: vec!["fmt.Println".into(), "db.Query().Scan".into(), "panic".into(), "log.Fatal*".into(), "map_".into(), "slices.Sort".into()],
+            ..go_rule()
+        };
+        assert_eq!(lines("a.go", src, &r), [4, 5, 6, 7, 8, 9]);
+    }
+
+    #[test]
+    fn go_imports_are_read_from_every_spec() {
+        let src = "package main\n\nimport \"fmt\"\n\nimport (\n\t\"os\"\n\tdb \"app/internal/db\"\n\t_ \"github.com/lib/pq\"\n)\n";
+        let found = imports("main.go", src, &["app/internal/db", "github.com/lib/*", "fmt"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `fmt` is forbidden",
+                "importing `app/internal/db` is forbidden",
+                "importing `github.com/lib/pq` is forbidden",
+            ]
+        );
+    }
+
     fn imports(path: &str, source: &str, forbid: &[&str], except: &[&str]) -> Vec<String> {
         let r = Rule {
             forbid_import: forbid.iter().map(|s| s.to_string()).collect(),
