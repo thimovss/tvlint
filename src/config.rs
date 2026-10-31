@@ -487,6 +487,9 @@ impl Config {
 
     fn validate(&self) -> Result<()> {
         for (id, rule) in &self.rules {
+            if let Some(problem) = id_problem(id) {
+                bail!("rule id `{id}` {problem}");
+            }
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
                 bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument or require_filename)");
             }
@@ -547,6 +550,13 @@ impl Config {
     }
 }
 
+/// Why `id` is not a valid rule id: lowercase words joined by single dashes, like `no-direct-db-access`.
+/// A `/` is out so that `web/no-print`, the name of a nested rule, can only mean one rule.
+pub fn id_problem(id: &str) -> Option<&'static str> {
+    let valid = !id.is_empty() && id.split('-').all(|word| !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase()));
+    (!valid).then_some("must be lowercase words joined by dashes, like `no-direct-db-access` (no slashes, digits, underscores or capitals)")
+}
+
 /// `path` inside the directory `dir`, as a path from the project root; `..` and `.` are resolved and a trailing `/` is kept.
 fn join(dir: &str, path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
@@ -566,6 +576,16 @@ fn join(dir: &str, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rule_ids_are_lowercase_words_joined_by_dashes() {
+        for good in ["a", "no-print", "no-direct-db-access"] {
+            assert!(id_problem(good).is_none(), "{good}");
+        }
+        for bad in ["", "web/no-print", "No-Print", "no_print", "-a", "a-", "a--b", "no-md5", "a b"] {
+            assert!(id_problem(bad).is_some(), "{bad}");
+        }
+    }
 
     #[test]
     fn join_resolves_paths_against_the_config_directory() {

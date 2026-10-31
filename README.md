@@ -275,7 +275,7 @@ A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `r
 
 | Key | Meaning |
 |---|---|
-| `rules` | Required. The rules, by id. |
+| `rules` | Required. The rules, by id. An id is lowercase words joined by dashes, like `no-direct-db-access`: no slashes, capitals, digits or underscores. |
 | `scopes` | Required. Which files each rule runs on. |
 | `aliases` | Optional. Import prefixes that stand for a project path, such as the `paths` entry of a `tsconfig.json`: `"@/": "src/"` turns `@/api` into `src/api`. Needed for `forbid_import` rules to see where an aliased import leads. The prefix and the path must both end with `/`, or neither. |
 

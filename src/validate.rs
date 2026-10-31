@@ -317,6 +317,9 @@ fn validate_rules(rules: &Value, report: &mut Report) -> BTreeSet<String> {
             report.error("rules", format!("rule ids must be strings, found {}", describe(key)), None);
             continue;
         };
+        if let Some(problem) = crate::config::id_problem(id) {
+            report.error(&format!("rules.{id}"), format!("the rule id {problem}"), None);
+        }
         ids.insert(id.to_string());
         validate_rule(&format!("rules.{id}"), value, report);
     }
@@ -1078,6 +1081,12 @@ scopes:
         );
         let found = errors(&yaml);
         assert!(has(&found, "rules.r.forbid_import", "not supported for python"), "{found:?}");
+    }
+
+    #[test]
+    fn rule_ids_must_be_lowercase_words_with_dashes() {
+        let yaml = GOOD.replace("no-http", "web/My_rule");
+        assert!(has(&errors(&yaml), "rules.web/My_rule", "must be lowercase words joined by dashes"), "{:?}", errors(&yaml));
     }
 
     #[test]
