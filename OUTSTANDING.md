@@ -12,7 +12,7 @@ Done items are removed from this list.
 
 ## Known limitations
 
-5. **Dotted keys.** Paths are joined with `.`. For `same_keys_as`, `use: path` and "missing key" positions, a key that itself contains a dot (like `a_failed.x`) is ambiguous.
+5. **Dotted keys with `use: path`.** `same_keys_as` and missing-key positions keep keys as segments, so `a.b` and `a` → `b` differ, and messages quote a dotted key (`"a.b".c`). `use: path` still yields the plain joined string, because the code it is compared with is a plain string; `{"a.b": 1}` and `{"a": {"b": 1}}` give the same name there.
 6. **YAML.** `same_keys_as` compares only the first document. Aliases and merge keys (`<<`) are not resolved. List items show as indexes in messages (`containers.1`).
 7. **Value checks.** They match text only, so `true` and `"true"` are indistinguishable. Lists and mappings are skipped by `forbid_value` and `require_value`.
 8. **Not built:**

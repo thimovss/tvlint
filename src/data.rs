@@ -102,8 +102,9 @@ impl Doc {
         found
     }
 
-    /// Every value that is not a map, by dotted path: the "keys" two translation files must share.
-    pub fn leaves(&self) -> BTreeMap<String, (Position, Option<String>)> {
+    /// Every value that is not a map, by its keys: the "keys" two translation files must share.
+    /// Kept as segments, so `{"a.b": 1}` and `{"a": {"b": 1}}` stay different.
+    pub fn leaves(&self) -> BTreeMap<Vec<String>, (Position, Option<String>)> {
         let mut found = BTreeMap::new();
         if let Some(first) = self.roots.first() {
             collect_leaves(first, &mut Vec::new(), &mut found);
@@ -112,17 +113,24 @@ impl Doc {
     }
 
     /// The position of the deepest ancestor of `path` that exists, to report a missing key near.
-    pub fn deepest_existing(&self, path: &str) -> Position {
+    pub fn deepest_existing(&self, path: &[String]) -> Position {
         let Some(first) = self.roots.first() else { return (1, 1) };
         let mut at = first.at;
         let mut node = first;
-        for segment in path.split('.') {
-            let Some(entry) = node.map().and_then(|entries| entries.iter().find(|e| e.key == segment)) else { break };
+        for segment in path {
+            let Some(entry) = node.map().and_then(|entries| entries.iter().find(|e| e.key == *segment)) else { break };
             at = entry.at;
             node = &entry.value;
         }
         at
     }
+}
+
+/// A path for messages, in the syntax of `PathPattern`: a key that contains a dot is quoted, so
+/// `["a.b", "c"]` reads `"a.b".c` and differs from `["a", "b", "c"]`.
+pub fn dotted(path: &[String]) -> String {
+    let shown: Vec<String> = path.iter().map(|s| if s.contains('.') { format!("\"{s}\"") } else { s.clone() }).collect();
+    shown.join(".")
 }
 
 fn walk_node(node: &Node, path: &mut Vec<String>, f: &mut dyn FnMut(&[String], Position, &Node)) {
@@ -147,17 +155,17 @@ fn walk_node(node: &Node, path: &mut Vec<String>, f: &mut dyn FnMut(&[String], P
     }
 }
 
-fn collect_leaves(node: &Node, path: &mut Vec<String>, out: &mut BTreeMap<String, (Position, Option<String>)>) {
+fn collect_leaves(node: &Node, path: &mut Vec<String>, out: &mut BTreeMap<Vec<String>, (Position, Option<String>)>) {
     let Value::Map(entries) = &node.value else { return };
     for entry in entries {
         path.push(entry.key.clone());
         match &entry.value.value {
             Value::Map(_) => collect_leaves(&entry.value, path, out),
             Value::Seq(_) => {
-                out.insert(path.join("."), (entry.at, None));
+                out.insert(path.clone(), (entry.at, None));
             }
             Value::Scalar(s) => {
-                out.insert(path.join("."), (entry.at, Some(s.text.clone())));
+                out.insert(path.clone(), (entry.at, Some(s.text.clone())));
             }
         }
         path.pop();
@@ -761,7 +769,18 @@ mod tests {
         assert_eq!(names(Use::Path), ["codes.a_failed.x", "codes.b_failed.y"]);
         let values = d.registry(&PathPattern::parse("list.*").unwrap(), Use::Value);
         assert_eq!(values.into_keys().collect::<Vec<_>>(), ["p", "q"]);
-        assert_eq!(d.leaves().keys().cloned().collect::<Vec<_>>(), ["codes.a_failed.x", "codes.b_failed.y", "list"]);
-        assert_eq!(d.deepest_existing("codes.zzz.q"), (1, 2));
+        let leaves: Vec<String> = d.leaves().keys().map(|k| dotted(k)).collect();
+        assert_eq!(leaves, ["codes.\"a_failed.x\"", "codes.\"b_failed.y\"", "list"]);
+        assert_eq!(d.deepest_existing(&["codes".into(), "zzz".into(), "q".into()]), (1, 2));
+    }
+
+    #[test]
+    fn a_dotted_key_is_not_a_nested_key() {
+        let flat = doc("a.json", "{\"a.b\": 1}");
+        let nested = doc("b.json", "{\"a\": {\"b\": 1}}");
+        assert_ne!(flat.leaves().keys().collect::<Vec<_>>(), nested.leaves().keys().collect::<Vec<_>>());
+        assert_eq!(dotted(&["a.b".into(), "c".into()]), "\"a.b\".c");
+        // The missing key is reported at the deepest key that really exists.
+        assert_eq!(nested.deepest_existing(&["a.b".into()]), (1, 1));
     }
 }

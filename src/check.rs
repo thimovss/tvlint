@@ -471,10 +471,6 @@ pub fn unused_registry_entries<'f>(
         .collect()
 }
 
-fn dotted(path: &[String]) -> String {
-    path.join(".")
-}
-
 fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut Vec<Violation>) {
     let Some(doc) = ctx.docs.get(&file.path) else { return };
     let mut report = |at: Position, message: String| {
@@ -491,7 +487,7 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
             if let Some(entries) = node.map()
                 && !entries.iter().any(|e| e.key == required.key)
             {
-                let place = if path.is_empty() { "the file".to_string() } else { format!("`{}`", dotted(path)) };
+                let place = if path.is_empty() { "the file".to_string() } else { format!("`{}`", data::dotted(path)) };
                 report(at, format!("{place} is missing the required `{}` property", required.key));
             }
         }
@@ -499,7 +495,7 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
             return;
         }
         if rule.data_property.iter().any(|p| p.matches(path)) {
-            report(at, format!("the `{}` property is forbidden", dotted(path)));
+            report(at, format!("the `{}` property is forbidden", data::dotted(path)));
         }
         let Some(values) = &rule.data_value else { return };
         if !values.names.iter().any(|p| p.matches(path)) {
@@ -513,7 +509,7 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
                 at,
                 format!(
                     "`{}` is `{}`, which is forbidden{}",
-                    dotted(path),
+                    data::dotted(path),
                     scalar.text,
                     matching.map_or(String::new(), |m| format!(" (matches `{m}`)"))
                 ),
@@ -524,7 +520,7 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
                 at,
                 format!(
                     "`{}` is `{}`; it must match {}",
-                    dotted(path),
+                    data::dotted(path),
                     scalar.text,
                     pv_require.map_or(String::new(), |r| r.iter().map(|g| format!("`{g}`")).collect::<Vec<_>>().join(" or "))
                 ),
@@ -545,10 +541,10 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
         let want = expected.leaves();
         let have = doc.leaves();
         for key in want.keys().filter(|k| !have.contains_key(*k)) {
-            report(doc.deepest_existing(key), format!("`{key}` is missing; {reference} has it"));
+            report(doc.deepest_existing(key), format!("`{}` is missing; {reference} has it", data::dotted(key)));
         }
         for (key, (at, _)) in have.iter().filter(|(k, _)| !want.contains_key(*k)) {
-            report(*at, format!("`{key}` is not in {reference}"));
+            report(*at, format!("`{}` is not in {reference}", data::dotted(key)));
         }
         if rule.rule.same_placeholders {
             for (key, (at, text)) in &have {
@@ -558,7 +554,7 @@ fn check_data(file: &SourceFile, rule: &CompiledRule, ctx: &Project, out: &mut V
                     let show = |set: &BTreeSet<String>| {
                         if set.is_empty() { "none".to_string() } else { set.iter().map(|p| format!("{{{p}}}")).collect::<Vec<_>>().join(", ") }
                     };
-                    report(*at, format!("`{key}` has placeholders {}, but {reference} has {}", show(&found), show(&wanted)));
+                    report(*at, format!("`{}` has placeholders {}, but {reference} has {}", data::dotted(key), show(&found), show(&wanted)));
                 }
             }
         }
