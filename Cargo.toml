@@ -1,5 +1,5 @@
 [package]
-name = "linter"
+name = "tvlint"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
@@ -23,5 +23,5 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"
 
 [[bin]]
-name = "prlint"
+name = "tvl"
 path = "src/main.rs"

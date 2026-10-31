@@ -1,10 +1,10 @@
 # Cookbook
 
-Ready-made rules you can copy into your `prlint.yaml`. Each recipe is one file in this directory: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your project, then run:
+Ready-made rules you can copy into your `tvl.yaml`. Each recipe is one file in this directory: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your project, then run:
 
 ```bash
-prlint validate   # is the config correct, and how many files does each rule run on?
-prlint check      # what does it find?
+tvl validate   # is the config correct, and how many files does each rule run on?
+tvl check      # what does it find?
 ```
 
 All recipes are for Python, the only language supported today.
@@ -18,13 +18,13 @@ How patterns match, so rules do what you expect:
 - **`forbid_raise`** matches the exception's full dotted name or its last part. `HTTPException` also catches `raise fastapi.HTTPException(...)`. A bare `raise` (re-raise) is never flagged.
 - **`forbid_call`** matches the callee as it is written. `*` matches anything, including dots. A chained call such as `session.exec(q).one()` is seen as `session.exec().one`, so `*.one` matches it.
 - **Imports are not resolved.** `from datetime import datetime` gives `datetime.now`, while `import datetime` gives `datetime.datetime.now`. List both spellings. An alias like `import datetime as dt` is not followed.
-- **Paths** in `include` and `exclude` are relative to the directory holding `prlint.yaml`. `*` stays within one directory, `**` crosses directories. Use `exclude` for the one place where the forbidden thing is allowed.
+- **Paths** in `include` and `exclude` are relative to the directory holding `tvl.yaml`. `*` stays within one directory, `**` crosses directories. Use `exclude` for the one place where the forbidden thing is allowed.
 - **Always write `rationale` and `fix`.** They are printed with every violation, and they are what lets a developer or an AI agent correct the code without asking.
 
 Adjust the `src/**` paths in the recipes to your layout. Every file is also a valid config on its own, so you can try one directly:
 
 ```bash
-prlint validate -c cookbook/python/no-wall-clock-in-tests.yaml
+tvl validate -c cookbook/python/no-wall-clock-in-tests.yaml
 ```
 
 ## Recipes

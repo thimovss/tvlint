@@ -8,7 +8,7 @@ Done items are removed from this list.
 
 ## Performance
 
-4. **Changed-files-only checks take about 0.65s on a 10k-file project; the target is under 100ms.** A full check of 10k files (mixed Python, TSX, JSON, YAML, 4 rules) now takes about 0.9s on 10 cores (it was 3.0s before parsing, the class index and rule evaluation ran in parallel). A check of one directory is not faster, because prlint still parses every file: class lookups, import resolution and registry files need the whole project. Fix: parse lazily, only the selected files plus what the active rules actually need (Python files only if a rule uses `forbid_catch`, only the referenced registry and reference files). The walk itself is still single-threaded.
+4. **Changed-files-only checks take about 0.65s on a 10k-file project; the target is under 100ms.** A full check of 10k files (mixed Python, TSX, JSON, YAML, 4 rules) now takes about 0.9s on 10 cores (it was 3.0s before parsing, the class index and rule evaluation ran in parallel). A check of one directory is not faster, because TVLint still parses every file: class lookups, import resolution and registry files need the whole project. Fix: parse lazily, only the selected files plus what the active rules actually need (Python files only if a rule uses `forbid_catch`, only the referenced registry and reference files). The walk itself is still single-threaded.
 
 ## Known limitations
 
@@ -22,8 +22,4 @@ Done items are removed from this list.
 
 ## Product brief versus reality
 
-CLAUDE.md still describes a product that does not exist yet. Not built:
-
-- a mandatory reason on suppressions (optional today)
-
-Decision needed: update the brief to match what exists (`prlint`, `prlint.yaml`), or move these to a roadmap.
+- A mandatory reason on suppressions. Today `tvl-ignore-next-line` takes an optional reason, and the brief calls for a required one.

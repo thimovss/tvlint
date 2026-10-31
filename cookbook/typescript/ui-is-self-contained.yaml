@@ -2,7 +2,7 @@
 # A folder that may only import from itself (and from packages) cannot depend on features,
 # hooks or utils. forbid_import matches project paths, except_import lists what is allowed.
 #
-# "aliases" tells prlint that "@/" means "src/", as in tsconfig.json "paths". Without it,
+# "aliases" tells TVLint that "@/" means "src/", as in tsconfig.json "paths". Without it,
 # "@/hooks/x" would not be seen as the project path src/hooks/x.
 
 aliases:

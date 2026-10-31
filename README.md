@@ -1,4 +1,4 @@
-# prlint
+# TVLint
 
 Enforce your team's code rules deterministically. Rules live in a YAML file, violations come back with a reason and a fix so both humans and AI agents can act on them.
 
@@ -12,41 +12,41 @@ cargo install --path .
 
 ## Usage
 
-In a project without a config, `prlint init` writes an empty `prlint.yaml` to fill in. Then run from the directory that contains `prlint.yaml`:
+In a project without a config, `tvl init` writes an empty `tvl.yaml` to fill in. Then run from the directory that contains `tvl.yaml`:
 
 ```bash
-prlint
+tvl
 ```
 
 ```
-prlint [OPTIONS] [COMMAND]
+tvl [OPTIONS] [COMMAND]
 ```
 
 ### Commands
 
 | Command | What it does |
 |---|---|
-| `check [PATH]...` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. Pass files, directories or glob patterns to check only those (see below). |
-| `init [--force]` | Scaffolds an empty `prlint.yaml`: no rules, only a commented example and the commands to run next. Refuses to overwrite an existing file unless `--force` is given. |
+| `check [PATH]...` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `tvl` and `tvl check` are the same. Pass files, directories or glob patterns to check only those (see below). |
+| `init [--force]` | Scaffolds an empty `tvl.yaml`: no rules, only a commented example and the commands to run next. Refuses to overwrite an existing file unless `--force` is given. |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |
-| `schema` | Prints the JSON Schema of the config file (also kept in [prlint.schema.json](prlint.schema.json)). Point your editor at it for completion and inline errors, or give it to an AI agent that writes rules. |
-| `help [command]` | Prints help for prlint or for one command. |
+| `schema` | Prints the JSON Schema of the config file (also kept in [tvl.schema.json](tvl.schema.json)). Point your editor at it for completion and inline errors, or give it to an AI agent that writes rules. |
+| `help [command]` | Prints help for TVLint or for one command. |
 
 ### Checking specific files
 
-`prlint check` takes any number of files, directories or glob patterns, relative to the directory you run it from. Without any, it checks the whole project.
+`tvl check` takes any number of files, directories or glob patterns, relative to the directory you run it from. Without any, it checks the whole project.
 
 ```bash
-prlint check src/api.ts                    # one file
-prlint check src/routes src/hooks          # directories: everything below them
-prlint check "src/**/*.test.ts"            # a glob: quote it so prlint expands it, not the shell
-prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root, as a pre-commit hook does
+tvl check src/api.ts                    # one file
+tvl check src/routes src/hooks          # directories: everything below them
+tvl check "src/**/*.test.ts"            # a glob: quote it so tvl expands it, not the shell
+tvl check -c frontend/tvl.yaml frontend/src/App.tsx   # from the repo root, as a pre-commit hook does
 ```
 
 - A file is still only checked by the rules whose scope includes it. Passing a path narrows what runs, it never widens a scope.
-- Paths must be inside the project, the directory of the config file, and must exist, otherwise prlint exits with `2`. A glob that matches nothing is a warning on stderr. Files ignored by `.gitignore` are skipped, as always.
+- Paths must be inside the project, the directory of the config file, and must exist, otherwise TVLint exits with `2`. A glob that matches nothing is a warning on stderr. Files ignored by `.gitignore` are skipped, as always.
 - Everything is still parsed, so rules that follow imports or class hierarchies see the same project as in a full run, but only the selected files are reported on.
 - With `--staged`, a file must be both staged and selected.
 
@@ -56,13 +56,13 @@ prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root
 |---|---|
 | `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. Combined with `PATH` arguments, a file must be both staged and selected. |
 | `--format <FORMAT>` | `check` only. `text` (default) is for people. `json` prints one document with `violations` (each with `rule`, `file`, `line`, `column`, `message`, `rationale` and `fix`) and a `summary`, for scripts and AI agents. `sarif` prints SARIF 2.1.0 for GitHub code scanning and editors; the `fix` goes in the rule's `help` and the result message. With `json` or `sarif`, stdout holds only the document (warnings go to stderr), and the exit code is the same: `1` when there are violations. |
-| `-c, --config <path>` | Path to the config file. Defaults to `prlint.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
+| `-c, --config <path>` | Path to the config file. Defaults to `tvl.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |
 
 ### Validating rules
 
-`prlint validate` is meant for people and AI agents that add rules. It reports all problems in one pass, not just the first.
+`tvl validate` is meant for people and AI agents that add rules. It reports all problems in one pass, not just the first.
 
 - **Errors** make the config invalid (exit `1`): unknown or misspelled keys (with a "did you mean" suggestion), missing `language`, `rationale` or `fix`, wrong types, a rule with no checks, invalid globs, scopes that name a rule that doesn't exist, bad YAML syntax.
 - **Warnings** don't fail validation (exit `0`) but usually mean a mistake: a rule no scope uses, a scope that matches no files for the rule's language, a `subclass_of` class that isn't defined in the project. They are only reported once there are no errors.
@@ -70,13 +70,13 @@ prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root
 
 ### Editor and agent support
 
-`prlint.schema.json` describes the config file: keys, types, which languages each check supports, and which keys need each other. Add this as the first line of `prlint.yaml` and editors with the YAML language server (VS Code, JetBrains, Neovim) complete keys and flag mistakes as you type:
+`tvl.schema.json` describes the config file: keys, types, which languages each check supports, and which keys need each other. Add this as the first line of `tvl.yaml` and editors with the YAML language server (VS Code, JetBrains, Neovim) complete keys and flag mistakes as you type:
 
 ```yaml
-# yaml-language-server: $schema=./prlint.schema.json
+# yaml-language-server: $schema=./tvl.schema.json
 ```
 
-`prlint schema` prints the same schema, so it works from an installed binary: `prlint schema > prlint.schema.json`. The schema cannot check that scopes name existing rules, that globs are valid, or that a scope matches any files; `prlint validate` does.
+`tvl schema` prints the same schema, so it works from an installed binary: `tvl schema > tvl.schema.json`. The schema cannot check that scopes name existing rules, that globs are valid, or that a scope matches any files; `tvl validate` does.
 
 ### Exit codes
 
@@ -84,7 +84,7 @@ prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root
 |---|---|
 | `0` | No violations. |
 | `1` | At least one violation was found (`check`), or the config is invalid (`validate`). |
-| `2` | prlint could not run: missing or invalid config, unknown rule, bad glob. The message goes to stderr. |
+| `2` | TVLint could not run: missing or invalid config, unknown rule, bad glob. The message goes to stderr. |
 
 Violations go to stdout, one per rule hit:
 
@@ -106,15 +106,15 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `yaml` | `.yaml`, `.yml` |
 | `toml` | `.toml` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `prlint validate` says so when a rule asks a language for something it cannot do.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `tvl validate` says so when a rule asks a language for something it cannot do.
 
 JSON, YAML and TOML are data, not code: they are checked by key path (see [Data files](#data-files)), and a rule cannot mix them with code languages. Hidden directories such as `.github/` are read; `.git` and anything in `.gitignore` are not.
 
 ### Output for tools
 
 ```bash
-prlint check --format json > prlint-report.json
-prlint check --format sarif > prlint.sarif
+tvl check --format json > tvl-report.json
+tvl check --format sarif > tvl.sarif
 ```
 
 To show violations as annotations on pull requests, upload the SARIF file with GitHub's `github/codeql-action/upload-sarif` step.
@@ -125,29 +125,29 @@ Two comments switch checks off. They work the same in Python, JavaScript and Typ
 
 | Comment | Effect |
 |---|---|
-| `prlint-ignore-next-line` | Hides every violation reported on the line directly after the comment. |
-| `prlint-ignore-file` | On line 1 of the file, excludes the whole file from every rule, file-name rules included. |
+| `tvl-ignore-next-line` | Hides every violation reported on the line directly after the comment. |
+| `tvl-ignore-file` | On line 1 of the file, excludes the whole file from every rule, file-name rules included. |
 
 ```python
-# prlint-ignore-next-line: legacy endpoint, see ISSUE-123
+# tvl-ignore-next-line: legacy endpoint, see ISSUE-123
 raise ValueError("not found")
 ```
 
 ```tsx
-{/* prlint-ignore-next-line */}
+{/* tvl-ignore-next-line */}
 <button onClick={open}>Open</button>
 ```
 
 ```ts
-// prlint-ignore-file: generated code
+// tvl-ignore-file: generated code
 ```
 
 - Use the comment style of the language: `#` in Python; `//` or `/* */` in JavaScript and TypeScript, and `{/* */}` inside JSX.
 - The directive must start the comment. A reason may follow it (`: why`), and is a good idea, but is not required.
-- **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # prlint-ignore-next-line`) hides the next line, not its own.
+- **Next line** means the line right after the comment's last line. A violation is reported on the line where the flagged code starts, so for a statement spanning several lines, put the comment above its first line. A trailing comment (`code  # tvl-ignore-next-line`) hides the next line, not its own.
 - **File** needs the comment to be the first thing on line 1. A shebang line or a blank line before it means it does not count. Only Python, JavaScript and TypeScript files can carry it.
 - An ignored file is still read to learn its classes, so other files' `forbid_catch` results do not change when a file opts out.
-- Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `prlint: 7 violation(s) in 4 file(s) [5 hidden by prlint-ignore-next-line, 3 file(s) skipped by prlint-ignore-file]`.
+- Nothing is silent: the summary line says how many violations were hidden and how many files were skipped, e.g. `tvl: 7 violation(s) in 4 file(s) [5 hidden by tvl-ignore-next-line, 3 file(s) skipped by tvl-ignore-file]`.
 
 ## Data files
 
@@ -166,7 +166,7 @@ JSON, YAML and TOML files are read into one model of maps, lists and values, so 
 - **`require_property`** splits the path into the container and the key: `jobs.*.timeout-minutes` means "every job has `timeout-minutes`". A container that does not exist (`permissions.contents` when there is no `permissions`) is reported once for the file; a wildcard container that matches nothing is fine. The last segment must be a key name. In a multi-document YAML file every document is checked.
 - **`property_value`** looks at the scalar values at the `names` paths, with `forbid_value: [globs]` (none may match) and/or `require_value: [globs]` (one must match). Values are plain text, so `true`, `"true"` and `1.0` are just the text of the value, and quotes and escapes are removed. Lists and mappings are skipped. Values are globs, where `*` matches anything: write a literal star as `[*]` (`forbid_value: ["[*]"]` forbids a wildcard version).
 - **`same_keys_as`** compares the keys of every in-scope file with a reference file (usually the source-language translation): `a.b` must exist in both. Lists count as values. Add `same_placeholders: true` to also compare the `{{name}}`, `{name}` and ICU `{count, plural, ...}` names in each message.
-- Comments work as in code: in YAML and TOML, `# prlint-ignore-next-line` hides the violations of the next line, and `# prlint-ignore-file` on line 1 skips the file. JSON has no comment syntax of its own, but the parser accepts `//` and `/* */` comments, so a directive works in `.json` and `.jsonc` files alike (tools that read the file strictly will reject them).
+- Comments work as in code: in YAML and TOML, `# tvl-ignore-next-line` hides the violations of the next line, and `# tvl-ignore-file` on line 1 skips the file. JSON has no comment syntax of its own, but the parser accepts `//` and `/* */` comments, so a directive works in `.json` and `.jsonc` files alike (tools that read the file strictly will reject them).
 - YAML aliases (`*name`) and merge keys (`<<`) are not resolved; an alias is a value whose text is `*name`.
 
 ```yaml
@@ -230,7 +230,7 @@ rules:
 
 Looking for rules to start from? See the [cookbook](cookbook/).
 
-`prlint.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
+`tvl.yaml` has two sections: `rules` says what is forbidden, `scopes` says which files each rule runs on.
 
 ```yaml
 rules:
@@ -291,4 +291,4 @@ A rule that appears in no scope never runs. Files ignored by `.gitignore` are sk
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); contributors sign a [CLA](CLA.md) so the maintainer can also offer prlint under other terms.
+AGPL-3.0-only. See [LICENSE](LICENSE). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md); contributors sign a [CLA](CLA.md) so the maintainer can also offer TVLint under other terms.

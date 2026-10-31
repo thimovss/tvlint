@@ -1,6 +1,6 @@
 # Cookbook: TOML
 
-Ready-made rules for `prlint.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `prlint validate` and `prlint check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
+Ready-made rules for `tvl.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
 
 Rules on JSON, YAML and TOML read **key paths** (`package.license`, `dependencies.*`), not syntax. Tables (`[a.b]`), dotted keys, inline tables and arrays of tables (`[[bin]]`, addressed by index) all end up as the same paths. See [Data files](../../README.md#data-files). Values in `forbid_value` and `require_value` are globs: write a literal `*` as `[*]`.
 

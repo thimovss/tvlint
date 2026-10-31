@@ -1,6 +1,6 @@
-# Codebase Linter: Product Brief
+# TVLint: Product Brief
 
-*Working name. Business-rule enforcement for AI-assisted codebases.*
+*Business-rule enforcement for AI-assisted codebases. The command is `tvl`.*
 
 ## Problem
 
@@ -25,8 +25,8 @@ A fast, Rust-based CLI that enforces team-defined business and architecture rule
 
 **In scope**
 
-- Single binary CLI (`lint check`, `lint init`, `lint explain <rule>`)
-- YAML rule files in `.lint/rules/`
+- Single binary CLI (`tvl check`, `tvl init`, `tvl explain <rule>`)
+- One YAML rule file, `tvl.yaml`, at the project root
 - Parsing via tree-sitter; **JavaScript, TypeScript, and Python** first, behind a language-agnostic adapter layer (see Architecture)
 - Four rule types:
   1. **Dependency boundaries:** `src/ui` may not import from `src/db`

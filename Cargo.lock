@@ -246,28 +246,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
-name = "linter"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "globset",
- "ignore",
- "rayon",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tree-sitter",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-toml-ng",
- "tree-sitter-typescript",
- "tree-sitter-yaml",
-]
-
-[[package]]
 name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -541,6 +519,28 @@ checksum = "53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97"
 dependencies = [
  "cc",
  "tree-sitter-language",
+]
+
+[[package]]
+name = "tvlint"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "globset",
+ "ignore",
+ "rayon",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tree-sitter",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-toml-ng",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
-# Runs prlint's own rules (prlint.yaml) against this repository.
-name: prlint
+# Runs TVLint's own rules (tvl.yaml) against this repository.
+name: TVLint
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  prlint:
+  tvl:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,27 +22,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build prlint
+      - name: Build TVLint
         run: cargo build --release --locked
 
-      - name: Validate prlint.yaml
-        run: ./target/release/prlint validate
+      - name: Validate tvl.yaml
+        run: ./target/release/tvl validate
 
       # Exit code 1 only means "violations found", which the next step reports; 2 is a real failure.
       - name: Write SARIF report
         run: |
           code=0
-          ./target/release/prlint check --format sarif > prlint.sarif || code=$?
+          ./target/release/tvl check --format sarif > tvl.sarif || code=$?
           [ "$code" -le 1 ] || exit "$code"
 
       # Needs code scanning, which is free for public repositories. It must not fail the build elsewhere.
       - name: Upload SARIF to code scanning
-        if: always() && hashFiles('prlint.sarif') != ''
+        if: always() && hashFiles('tvl.sarif') != ''
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: prlint.sarif
-          category: prlint
+          sarif_file: tvl.sarif
+          category: tvl
 
       - name: Check the codebase
-        run: ./target/release/prlint check
+        run: ./target/release/tvl check

@@ -1,13 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "prlint configuration",
-  "description": "A prlint.yaml file: `rules` say what is forbidden, `scopes` say which files each rule runs on.",
+  "title": "TVLint configuration",
+  "description": "A tvl.yaml file: `rules` say what is forbidden, `scopes` say which files each rule runs on.",
   "type": "object",
   "required": ["rules", "scopes"],
   "additionalProperties": false,
   "properties": {
     "rules": {
-      "description": "The rules, by id. The id is what violations, `scopes` and `prlint explain` refer to.",
+      "description": "The rules, by id. The id is what violations, `scopes` and `tvl explain` refer to.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": { "$ref": "#/$defs/rule" }
@@ -66,7 +66,7 @@
       ]
     },
     "onlyImporting": {
-      "description": "Languages whose imports prlint reads.",
+      "description": "Languages whose imports TVLint reads.",
       "anyOf": [
         { "enum": ["javascript", "typescript", "rust"] },
         { "type": "array", "items": { "enum": ["javascript", "typescript", "rust"] } }

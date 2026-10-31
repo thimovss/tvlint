@@ -9,9 +9,9 @@ use crate::config::Rule;
 pub struct Summary {
     pub files_checked: usize,
     pub files_with_violations: usize,
-    /// Violations hidden by `prlint-ignore-next-line`.
+    /// Violations hidden by `tvl-ignore-next-line`.
     pub suppressed: usize,
-    /// Files skipped by `prlint-ignore-file`.
+    /// Files skipped by `tvl-ignore-file`.
     pub files_ignored: usize,
 }
 
@@ -79,7 +79,7 @@ pub fn sarif(violations: &[Violation], rules: &BTreeMap<String, Rule>) -> String
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": { "driver": { "name": "prlint", "version": env!("CARGO_PKG_VERSION"), "rules": driver_rules } },
+            "tool": { "driver": { "name": "TVLint", "version": env!("CARGO_PKG_VERSION"), "rules": driver_rules } },
             "results": results,
         }],
     });

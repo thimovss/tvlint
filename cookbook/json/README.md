@@ -1,6 +1,6 @@
 # Cookbook: JSON
 
-Ready-made rules for `prlint.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `prlint validate` and `prlint check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
+Ready-made rules for `tvl.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths to your layout, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes work in general.
 
 Rules on JSON, YAML and TOML read **key paths** (`dependencies.*`, `compilerOptions.strict`), not syntax. See [Data files](../../README.md#data-files) for the path syntax; the same rules work in all three formats. Values in `forbid_value` and `require_value` are globs: write a literal `*` as `[*]`.
 

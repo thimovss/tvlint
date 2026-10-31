@@ -1,10 +1,10 @@
-# Contributing to prlint
+# Contributing to TVLint
 
 Thanks for helping. This page covers the agreement you sign first, then how to build and check a change.
 
 ## Contributor License Agreement
 
-prlint is open source under the [AGPL-3.0](LICENSE). The maintainer also reserves the right to offer it under other terms, such as a commercial license. That only works if the maintainer may relicense every contribution, so **you must sign the [CLA](CLA.md) before a pull request can be merged**.
+TVLint is open source under the [AGPL-3.0](LICENSE). The maintainer also reserves the right to offer it under other terms, such as a commercial license. That only works if the maintainer may relicense every contribution, so **you must sign the [CLA](CLA.md) before a pull request can be merged**.
 
 - You keep the copyright in your work. The CLA gives the maintainer a license to it.
 - You sign once, in your first pull request: a bot comments, and you reply with the sentence it gives you.
@@ -17,16 +17,16 @@ prlint is open source under the [AGPL-3.0](LICENSE). The maintainer also reserve
 cargo build
 cargo test
 cargo clippy --all-targets
-cargo run -- check          # prlint checks its own code against prlint.yaml
+cargo run -- check          # tvl checks its own code against tvl.yaml
 ```
 
-All four must pass. CI runs `prlint validate` and `prlint check` on every pull request.
+All four must pass. CI runs `tvl validate` and `tvl check` on every pull request.
 
 ## What a change should include
 
 - **Tests.** Unit tests sit next to the code; end-to-end CLI tests are in `tests/`.
-- **Docs.** A new rule key, flag or command goes in `README.md`. A new rule type or language also goes in `prlint.schema.json` (`prlint schema` prints the current one).
-- **Architecture.** `prlint.yaml` encodes the layering of the modules and which crates may be used where. If `prlint check` reports a violation, its `rationale` and `fix` say what to do. Don't suppress it without a reason.
+- **Docs.** A new rule key, flag or command goes in `README.md`. A new rule type or language also goes in `tvl.schema.json` (`tvl schema` prints the current one).
+- **Architecture.** `tvl.yaml` encodes the layering of the modules and which crates may be used where. If `tvl check` reports a violation, its `rationale` and `fix` say what to do. Don't suppress it without a reason.
 - **Recipes.** Ready-made rules live in `cookbook/`, one `.yaml` file per rule, each with a `rationale` and a `fix`.
 
 ## Reporting a problem

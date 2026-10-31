@@ -1,6 +1,6 @@
-//! The files, directories and globs given to `prlint check`, as a filter on project paths.
+//! The files, directories and globs given to `tvl check`, as a filter on project paths.
 //!
-//! Arguments are relative to the directory the user runs prlint from, which is not always the
+//! Arguments are relative to the directory the user runs tvl from, which is not always the
 //! project root (the directory of the config file), so they are turned into root-relative paths.
 
 use std::path::{Component, Path, PathBuf};
@@ -101,7 +101,7 @@ mod tests {
 
     /// A project on disk: web/src/a.ts, web/src/lib/b.ts, web/src/[id].tsx, api/m.py.
     fn project() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("prlint-select-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let root = std::env::temp_dir().join(format!("tvl-select-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = fs::remove_dir_all(&root);
         for file in ["web/src/a.ts", "web/src/lib/b.ts", "web/src/[id].tsx", "api/m.py"] {
             let path = root.join(file);

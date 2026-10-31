@@ -4,14 +4,14 @@ use anyhow::{Context, Result, bail};
 
 /// An empty but valid config. The commented rule shows the shape; nothing is enforced until the user writes one.
 const TEMPLATE: &str = "\
-# prlint.yaml: the rules of this project, checked deterministically.
+# tvl.yaml: the rules of this project, checked deterministically.
 #
-#   prlint validate        is this file correct?
-#   prlint check           does the code follow it?
-#   prlint explain <rule>  why does a rule exist, and how do I comply?
+#   tvl validate        is this file correct?
+#   tvl check           does the code follow it?
+#   tvl explain <rule>  why does a rule exist, and how do I comply?
 #
 # A rule says what is not allowed and why. Every rule carries a `rationale` and a `fix`, which
-# prlint prints with each violation so a developer or an AI agent knows how to comply.
+# tvl prints with each violation so a developer or an AI agent knows how to comply.
 # `scopes` say which files a rule applies to. For example:
 #
 # rules:
@@ -37,8 +37,8 @@ pub fn run(config_path: &Path, force: bool) -> Result<()> {
     }
     std::fs::write(config_path, TEMPLATE).with_context(|| format!("cannot write {}", config_path.display()))?;
     println!("Created {}, with no rules yet.", config_path.display());
-    println!("Add rules under `rules:` and the files they apply to under `scopes:`, then run prlint validate.");
-    println!("`prlint schema` prints the JSON Schema of the file, for editors and AI agents.");
+    println!("Add rules under `rules:` and the files they apply to under `scopes:`, then run tvl validate.");
+    println!("`tvl schema` prints the JSON Schema of the file, for editors and AI agents.");
     Ok(())
 }
 

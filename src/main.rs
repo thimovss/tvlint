@@ -24,10 +24,10 @@ use scope::CompiledScope;
 use suppress::Suppressions;
 
 #[derive(Parser)]
-#[command(name = "prlint", version, about = "Enforce your team's code rules deterministically")]
+#[command(name = "tvl", version, about = "Enforce your team's code rules deterministically")]
 struct Cli {
     /// Path to the config file; the project root is its directory
-    #[arg(short, long, global = true, default_value = "prlint.yaml")]
+    #[arg(short, long, global = true, default_value = "tvl.yaml")]
     config: PathBuf,
 
     /// Defaults to `check` when omitted
@@ -51,7 +51,7 @@ enum Command {
     /// Check the project against all rules (exit 1 if any violation is found)
     Check {
         /// Files, directories or glob patterns to check, relative to the current directory.
-        /// Quote globs so prlint expands them (`"src/**/*.ts"`). Default: the whole project
+        /// Quote globs so tvl expands them (`"src/**/*.ts"`). Default: the whole project
         #[arg(value_name = "PATH")]
         paths: Vec<String>,
         /// Only check files staged in git (as they are in the index). Combined with PATH, a
@@ -64,14 +64,14 @@ enum Command {
     },
     /// Show why a rule exists, what it forbids and where it applies
     Explain {
-        /// Rule id, as listed by `prlint list`
+        /// Rule id, as listed by `tvl list`
         rule: String,
     },
     /// List all configured rules
     List,
     /// Check the config file for mistakes and explain every problem (exit 1 if invalid)
     Validate,
-    /// Create a starter prlint.yaml, with rules chosen for the languages found in the project
+    /// Create a starter tvl.yaml, with rules chosen for the languages found in the project
     Init {
         /// Overwrite the config file if it already exists
         #[arg(long)]
@@ -81,7 +81,7 @@ enum Command {
     Schema,
 }
 
-pub const SCHEMA: &str = include_str!("../prlint.schema.json");
+pub const SCHEMA: &str = include_str!("../tvl.schema.json");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
     match result {
         Ok(code) => ExitCode::from(code),
         Err(err) => {
-            eprintln!("prlint: {err:#}");
+            eprintln!("tvl: {err:#}");
             ExitCode::from(2)
         }
     }
@@ -152,7 +152,7 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
         .collect();
     let all_paths = source::list_all(&root)?;
     for unmatched in selection.iter().flat_map(|s| s.unmatched(&all_paths)) {
-        eprintln!("prlint: warning: `{unmatched}` matches no file (files ignored by .gitignore are skipped)");
+        eprintln!("tvl: warning: `{unmatched}` matches no file (files ignored by .gitignore are skipped)");
     }
     let known_paths: std::collections::HashSet<String> = all_paths.iter().cloned().collect();
     let docs: BTreeMap<String, data::Doc> =
@@ -202,7 +202,7 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
     for (&(file_idx, _), (found, hidden)) in jobs.iter().zip(results) {
         let file = &files[file_idx];
         if checked.insert(file.path.as_str()) && file.has_syntax_errors() {
-            eprintln!("prlint: warning: {} has syntax errors, results may be incomplete", file.path);
+            eprintln!("tvl: warning: {} has syntax errors, results may be incomplete", file.path);
         }
         suppressed += hidden;
         violations.extend(found);
@@ -280,16 +280,16 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
             // What was hidden stays visible in the summary, so suppressions can be audited.
             let mut notes = Vec::new();
             if suppressed > 0 {
-                notes.push(format!("{suppressed} hidden by prlint-ignore-next-line"));
+                notes.push(format!("{suppressed} hidden by tvl-ignore-next-line"));
             }
             if ignored_in_scope > 0 {
-                notes.push(format!("{ignored_in_scope} file(s) skipped by prlint-ignore-file"));
+                notes.push(format!("{ignored_in_scope} file(s) skipped by tvl-ignore-file"));
             }
             let notes = if notes.is_empty() { String::new() } else { format!(" [{}]", notes.join(", ")) };
             if violations.is_empty() {
-                println!("prlint: no violations ({} files checked){notes}", checked.len());
+                println!("tvl: no violations ({} files checked){notes}", checked.len());
             } else {
-                println!("prlint: {} violation(s) in {files_with_violations} file(s){notes}", violations.len());
+                println!("tvl: {} violation(s) in {files_with_violations} file(s){notes}", violations.len());
             }
         }
     }

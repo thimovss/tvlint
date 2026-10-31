@@ -1,6 +1,6 @@
 # Cookbook: TypeScript and JavaScript
 
-Ready-made rules for `prlint.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths, then run `prlint validate` and `prlint check`. See the [Python cookbook](../python/README.md) for how scopes and patterns work in general.
+Ready-made rules for `tvl.yaml`. Each recipe is one file: a rule plus the scope that applies it. Copy the rule under `rules:` and the scope entry under `scopes:`, adjust the paths, then run `tvl validate` and `tvl check`. See the [Python cookbook](../python/README.md) for how scopes and patterns work in general.
 
 Every recipe uses `language: [javascript, typescript]`, so it covers `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts` and `.cts`. Use `language: typescript` to leave plain JavaScript out.
 

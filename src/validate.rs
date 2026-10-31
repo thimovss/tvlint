@@ -242,7 +242,7 @@ fn print_report(name: &str, report: &Report, config: Option<&Config>, summary: &
         }
     }
     if !report.errors.is_empty() {
-        println!("\nFix the errors above and run `prlint validate` again.");
+        println!("\nFix the errors above and run `tvl validate` again.");
         return;
     }
     if !report.warnings.is_empty() {
@@ -254,7 +254,7 @@ fn print_report(name: &str, report: &Report, config: Option<&Config>, summary: &
         println!("  forbids: {}", rule.forbids.join("; "));
         println!("  runs on {} file(s) {}", rule.files, if scopes.is_empty() { "(no scope)".into() } else { format!("[{}]", scopes.join(", ")) });
     }
-    println!("\nNext: `prlint check` to find violations, `prlint explain <rule>` to see one rule in full.");
+    println!("\nNext: `tvl check` to find violations, `tvl explain <rule>` to see one rule in full.");
 }
 
 // ---------------------------------------------------------------------------------------------

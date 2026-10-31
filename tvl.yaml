@@ -1,9 +1,9 @@
-# yaml-language-server: $schema=./prlint.schema.json
-# prlint lints itself. These are the architecture rules of this repository: what may depend on what,
+# yaml-language-server: $schema=./tvl.schema.json
+# TVLint lints itself. These are the architecture rules of this repository: what may depend on what,
 # and which crates may be used where. Formatting and general Rust lints belong to rustfmt and clippy.
 #
-#   prlint validate    # is this file correct?
-#   prlint check       # does the code follow it?
+#   tvl validate    # is this file correct?
+#   tvl check       # does the code follow it?
 
 rules:
   # ---- Language-agnostic core -------------------------------------------------------------------
@@ -139,7 +139,7 @@ rules:
   recipes-explain-themselves:
     language: yaml
     require_property: [rules, scopes, "rules.*.rationale", "rules.*.fix"]
-    rationale: A cookbook recipe is copied into other projects, where `prlint explain` is all a reader has.
+    rationale: A cookbook recipe is copied into other projects, where `tvl explain` is all a reader has.
     fix: Give every rule a rationale and a fix, and the recipe a scopes section.
 
   # ---- Repository layout ------------------------------------------------------------------------
