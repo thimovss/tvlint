@@ -1,0 +1,381 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "prlint configuration",
+  "description": "A prlint.yaml file: `rules` say what is forbidden, `scopes` say which files each rule runs on.",
+  "type": "object",
+  "required": ["rules", "scopes"],
+  "additionalProperties": false,
+  "properties": {
+    "rules": {
+      "description": "The rules, by id. The id is what violations, `scopes` and `prlint explain` refer to.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/rule" }
+    },
+    "scopes": {
+      "description": "Entries that say which files each rule runs on. A rule that appears in no scope never runs.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scope" }
+    },
+    "aliases": {
+      "description": "Import prefixes that stand for a project path, like a tsconfig `paths` entry: `\"@/\": \"src/\"` turns `@/api` into `src/api`. The prefix and the path must both end with `/`, or neither.",
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "propertyNames": { "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "pattern": "\\S" },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "stringOrList": {
+      "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "$ref": "#/$defs/stringList" }]
+    },
+
+    "language": {
+      "description": "A language a rule can apply to. Code languages are parsed; JSON, YAML and TOML are data files checked by key path.",
+      "enum": ["python", "javascript", "typescript", "rust", "json", "yaml", "toml"]
+    },
+    "languages": {
+      "description": "`python`, `javascript`, `typescript`, `rust`, `json`, `yaml` or `toml`, or a list of them. Code languages and data languages cannot share a rule.",
+      "anyOf": [
+        { "$ref": "#/$defs/language" },
+        { "type": "array", "minItems": 1, "items": { "enum": ["python", "javascript", "typescript", "rust"] } },
+        { "type": "array", "minItems": 1, "items": { "enum": ["json", "yaml", "toml"] } }
+      ]
+    },
+
+    "onlyPython": {
+      "anyOf": [{ "const": "python" }, { "type": "array", "items": { "const": "python" } }]
+    },
+    "onlyRaising": {
+      "description": "Languages with exceptions.",
+      "anyOf": [
+        { "enum": ["python", "javascript", "typescript"] },
+        { "type": "array", "items": { "enum": ["python", "javascript", "typescript"] } }
+      ]
+    },
+    "onlyCode": {
+      "anyOf": [
+        { "enum": ["python", "javascript", "typescript", "rust"] },
+        { "type": "array", "items": { "enum": ["python", "javascript", "typescript", "rust"] } }
+      ]
+    },
+    "onlyImporting": {
+      "description": "Languages whose imports prlint reads.",
+      "anyOf": [
+        { "enum": ["javascript", "typescript", "rust"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "rust"] } }
+      ]
+    },
+    "onlyEcmaScript": {
+      "anyOf": [
+        { "enum": ["javascript", "typescript"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript"] } }
+      ]
+    },
+    "onlyObjectLiterals": {
+      "description": "JavaScript and TypeScript object literals, and the key paths of data files.",
+      "anyOf": [
+        { "enum": ["javascript", "typescript", "json", "yaml", "toml"] },
+        { "type": "array", "items": { "enum": ["javascript", "typescript", "json", "yaml", "toml"] } }
+      ]
+    },
+    "onlyData": {
+      "anyOf": [
+        { "enum": ["json", "yaml", "toml"] },
+        { "type": "array", "items": { "enum": ["json", "yaml", "toml"] } }
+      ]
+    },
+
+    "propertyValue": {
+      "description": "Constraints on the value of object-literal properties (JavaScript, TypeScript) or of keys in data files (JSON, YAML, TOML).",
+      "type": "object",
+      "required": ["names"],
+      "additionalProperties": false,
+      "properties": {
+        "names": {
+          "description": "Property name or list of names to look at. Key paths in data files.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "in_call": {
+          "description": "Code only. Only look at objects passed directly as an argument to one of these calls, e.g. `toast.add`.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "forbid_literal": {
+          "description": "Code only. The value must not be a string literal.",
+          "type": "boolean"
+        },
+        "array_starts_with": {
+          "description": "Code only. An array-literal value must start with this element, matched as a glob on its source text, e.g. `accountID`. Other values are not checked.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "forbid_value": {
+          "description": "Data files only. The value must not match any of these globs, e.g. `^*` or `*:latest`.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "require_value": {
+          "description": "Data files only. The value must match one of these globs.",
+          "$ref": "#/$defs/stringOrList"
+        }
+      }
+    },
+
+    "literalArgument": {
+      "description": "Python, JavaScript, TypeScript, Rust. String literals passed to calls must be listed in a data file.",
+      "type": "object",
+      "required": ["calls", "registry"],
+      "additionalProperties": false,
+      "properties": {
+        "calls": {
+          "description": "Calls whose argument is checked, as patterns like `forbid_call`.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "position": {
+          "description": "Which argument, counting from 0.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "registry": {
+          "type": "object",
+          "required": ["file", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "description": "The data file listing the allowed values, relative to the config file.",
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "path": {
+              "description": "Which nodes of the file are entries, as a key path such as `errors.*`.",
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "use": {
+              "description": "What an entry is called: its `key`, its `value`, or its full `path`.",
+              "enum": ["key", "value", "path"],
+              "default": "value"
+            }
+          }
+        },
+        "report_unused": {
+          "description": "Also report registry entries that no call in scope uses.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+
+    "rule": {
+      "type": "object",
+      "required": ["rationale", "fix"],
+      "additionalProperties": false,
+      "properties": {
+        "language": { "$ref": "#/$defs/languages" },
+        "forbid_raise": {
+          "description": "Python, JavaScript, TypeScript. Exception names that may not be raised (`throw` in JavaScript and TypeScript). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_call": {
+          "description": "Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. `new Foo()` counts as a call to `Foo`. In Rust, functions use `::`, methods use `.` (`*.unwrap`), and macros end in `!` (`println!`).",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_catch": {
+          "description": "Python only. Forbids `except` clauses that catch a class or any class inheriting from it.",
+          "type": "object",
+          "required": ["subclass_of"],
+          "additionalProperties": false,
+          "properties": {
+            "subclass_of": {
+              "description": "Class name. Subclasses are found by name across the whole project, not by import path.",
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "forbid_import": {
+          "description": "JavaScript, TypeScript, Rust. Module specifiers that may not be imported, as path globs: `*` stays within one segment, `**` crosses segments. Relative and aliased imports match by project path, anything else by the specifier as written. Rust patterns use `::` (`sqlx::**`).",
+          "$ref": "#/$defs/stringList"
+        },
+        "except_import": {
+          "description": "JavaScript, TypeScript, Rust. Imports that are fine although they match `forbid_import`. Needs `forbid_import`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_element": {
+          "description": "JavaScript, TypeScript. JSX element names that may not be used, e.g. `button`. Matched on the tag as written, so `button` does not match `Button`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_property": {
+          "description": "JavaScript, TypeScript: object-literal property names that may not appear. JSON, YAML, TOML: key paths that must not exist, e.g. `scripts.postinstall`, `jobs.*.permissions`, `**.debug`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "property_value": { "$ref": "#/$defs/propertyValue" },
+        "within_property": {
+          "description": "JavaScript, TypeScript. Only count `forbid_call`, `forbid_raise` and `forbid_element` hits that sit inside an object-literal property with one of these names, e.g. `onError`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "require_property": {
+          "description": "JSON, YAML, TOML. Key paths that must exist, e.g. `jobs.*.timeout-minutes`: every match of the parent path must have the key.",
+          "$ref": "#/$defs/stringList"
+        },
+        "same_keys_as": {
+          "description": "JSON, YAML, TOML. A file, relative to the config file, whose key paths every matched data file must have too, no more and no fewer.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "same_placeholders": {
+          "description": "JSON, YAML, TOML. Also require the `{{placeholders}}` of each shared message to be the same as in `same_keys_as`. Needs `same_keys_as`.",
+          "type": "boolean"
+        },
+        "literal_argument": { "$ref": "#/$defs/literalArgument" },
+        "require_filename": {
+          "description": "File name globs, matched against the base name only. Every file in the rule's scope must match at least one, otherwise it is a violation reported at line 1. The only check that works without `language`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "rationale": {
+          "description": "Why the rule exists. Printed with every violation, so an AI agent knows the intent.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "fix": {
+          "description": "How to comply. Printed with every violation, so an AI agent knows what to do instead.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+
+      "anyOf": [
+        { "required": ["forbid_raise"] },
+        { "required": ["forbid_call"] },
+        { "required": ["forbid_catch"] },
+        { "required": ["forbid_import"] },
+        { "required": ["forbid_element"] },
+        { "required": ["forbid_property"] },
+        { "required": ["property_value"] },
+        { "required": ["require_property"] },
+        { "required": ["same_keys_as"] },
+        { "required": ["literal_argument"] },
+        { "required": ["require_filename"] }
+      ],
+
+      "dependencies": {
+        "except_import": ["forbid_import"],
+        "same_placeholders": ["same_keys_as"],
+        "within_property": {
+          "anyOf": [
+            { "required": ["forbid_call"] },
+            { "required": ["forbid_raise"] },
+            { "required": ["forbid_element"] }
+          ]
+        }
+      },
+
+      "allOf": [
+        {
+          "description": "Every check except require_filename needs `language`.",
+          "if": {
+            "anyOf": [
+              { "required": ["forbid_raise"] },
+              { "required": ["forbid_call"] },
+              { "required": ["forbid_catch"] },
+              { "required": ["forbid_import"] },
+              { "required": ["except_import"] },
+              { "required": ["forbid_element"] },
+              { "required": ["forbid_property"] },
+              { "required": ["property_value"] },
+              { "required": ["within_property"] },
+              { "required": ["require_property"] },
+              { "required": ["same_keys_as"] },
+              { "required": ["same_placeholders"] },
+              { "required": ["literal_argument"] }
+            ]
+          },
+          "then": { "required": ["language"] }
+        },
+        { "if": { "required": ["forbid_raise"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyRaising" } } } },
+        { "if": { "required": ["forbid_call"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
+        { "if": { "required": ["forbid_catch"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyPython" } } } },
+        { "if": { "required": ["forbid_import"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyImporting" } } } },
+        { "if": { "required": ["except_import"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyImporting" } } } },
+        { "if": { "required": ["forbid_element"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
+        { "if": { "required": ["within_property"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
+        { "if": { "required": ["forbid_property"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyObjectLiterals" } } } },
+        { "if": { "required": ["property_value"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyObjectLiterals" } } } },
+        { "if": { "required": ["require_property"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
+        { "if": { "required": ["same_keys_as"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
+        { "if": { "required": ["same_placeholders"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
+        { "if": { "required": ["literal_argument"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
+        {
+          "description": "property_value reads different keys in data files and in code.",
+          "if": {
+            "required": ["language", "property_value"],
+            "properties": { "language": { "$ref": "#/$defs/onlyData" } }
+          },
+          "then": {
+            "properties": {
+              "property_value": {
+                "allOf": [
+                  {
+                    "description": "Data files: needs forbid_value or require_value.",
+                    "anyOf": [{ "required": ["forbid_value"] }, { "required": ["require_value"] }]
+                  },
+                  {
+                    "description": "Data files do not take forbid_literal, array_starts_with or in_call.",
+                    "not": {
+                      "anyOf": [
+                        { "required": ["forbid_literal"] },
+                        { "required": ["array_starts_with"] },
+                        { "required": ["in_call"] }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "else": {
+            "if": { "required": ["property_value"] },
+            "then": {
+              "properties": {
+                "property_value": {
+                  "allOf": [
+                    {
+                      "description": "Code: needs forbid_literal: true or array_starts_with.",
+                      "anyOf": [
+                        { "required": ["array_starts_with"] },
+                        { "required": ["forbid_literal"], "properties": { "forbid_literal": { "const": true } } }
+                      ]
+                    },
+                    {
+                      "description": "Code does not take forbid_value or require_value.",
+                      "not": { "anyOf": [{ "required": ["forbid_value"] }, { "required": ["require_value"] }] }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "scope": {
+      "type": "object",
+      "required": ["rules", "include"],
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "description": "Rule ids that run on the matched files. Each must be defined under `rules`.",
+          "$ref": "#/$defs/stringList"
+        },
+        "include": {
+          "description": "Glob patterns relative to the config file's directory. `*` stays within one directory, `**` crosses directories.",
+          "$ref": "#/$defs/stringList"
+        },
+        "exclude": {
+          "description": "Globs to leave out.",
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

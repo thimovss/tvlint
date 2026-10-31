@@ -58,7 +58,7 @@ enum Command {
     Schema,
 }
 
-pub const SCHEMA: &str = include_str!("../schema/prlint.schema.json");
+pub const SCHEMA: &str = include_str!("../prlint.schema.json");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();

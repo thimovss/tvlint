@@ -30,6 +30,7 @@ prlint [OPTIONS] [COMMAND]
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |
+| `schema` | Prints the JSON Schema of the config file (also kept in [prlint.schema.json](prlint.schema.json)). Point your editor at it for completion and inline errors, or give it to an AI agent that writes rules. |
 | `help [command]` | Prints help for prlint or for one command. |
 
 ### Checking specific files
@@ -64,6 +65,16 @@ prlint check -c frontend/prlint.yaml frontend/src/App.tsx   # from the repo root
 - **Errors** make the config invalid (exit `1`): unknown or misspelled keys (with a "did you mean" suggestion), missing `language`, `rationale` or `fix`, wrong types, a rule with no checks, invalid globs, scopes that name a rule that doesn't exist, bad YAML syntax.
 - **Warnings** don't fail validation (exit `0`) but usually mean a mistake: a rule no scope uses, a scope that matches no files for the rule's language, a `subclass_of` class that isn't defined in the project. They are only reported once there are no errors.
 - When valid, it lists each rule with what it forbids and how many files it runs on. A rule that runs on `0 file(s)` is almost always a wrong glob.
+
+### Editor and agent support
+
+`prlint.schema.json` describes the config file: keys, types, which languages each check supports, and which keys need each other. Add this as the first line of `prlint.yaml` and editors with the YAML language server (VS Code, JetBrains, Neovim) complete keys and flag mistakes as you type:
+
+```yaml
+# yaml-language-server: $schema=./prlint.schema.json
+```
+
+`prlint schema` prints the same schema, so it works from an installed binary: `prlint schema > prlint.schema.json`. The schema cannot check that scopes name existing rules, that globs are valid, or that a scope matches any files; `prlint validate` does.
 
 ### Exit codes
 

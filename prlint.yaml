@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./prlint.schema.json
 # prlint lints itself. These are the architecture rules of this repository: what may depend on what,
 # and which crates may be used where. Formatting and general Rust lints belong to rustfmt and clippy.
 #
