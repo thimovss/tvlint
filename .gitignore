@@ -1,2 +1,6 @@
 /target
 /example
+
+# Editor and IDE files
+/.idea
+/.vscode
