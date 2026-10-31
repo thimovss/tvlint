@@ -62,36 +62,69 @@ pub(super) fn validate_ecmascript_keys(rule: &Mapping, path: &str, checks: &mut 
     }
 }
 
-pub(super) fn validate_literal_argument(value: &Value, path: &str, report: &mut Report) {
+pub(super) fn validate_literal_argument(value: &Value, path: &str, assignment: bool, report: &mut Report) {
     const KEYS: &[(&str, &str)] = &[
-        ("calls", "required; call pattern or list of patterns, like forbid_call"),
-        ("position", "optional; which argument to check, counting from 0 (default 0)"),
-        ("registry", "required; `file`, `path` and optionally `use` (key, value or path) of the data file listing the allowed values"),
-        ("report_unused", "optional; true also reports registry entries that no call uses"),
+        ("calls", "literal_argument; call pattern or list of patterns, like forbid_call"),
+        ("names", "literal_assignment; assignment target glob or list of globs, e.g. `event_type`"),
+        ("position", "literal_argument; which argument to check, counting from 0 (default 0)"),
+        ("registry", "`file`, `path` and optionally `use` (key, value or path) of the data file listing the allowed values"),
+        ("report_unused", "optional; true also reports registry entries that nothing uses"),
+        ("pattern", "optional; glob or list of globs every literal must match, e.g. `[a-z]*_failed.[a-z]*`"),
+        ("require_literal", "optional; true reports a watched value that is not a plain string literal"),
+        ("lookup", "optional; `value` (default) or `prefix`: look up the literal itself or the part before its first dot"),
     ];
-    let Some(map) = expect_mapping(value, path, "a mapping with `calls` and `registry`", report) else { return };
+    let Some(map) = expect_mapping(value, path, "a mapping with `calls` (or `names`) and a check", report) else { return };
     check_keys(map, path, KEYS, report);
-    match map.get("calls") {
-        None => report.error(path, "missing required key `calls`", Some("add `calls: [\"*Exception\"]`".into())),
+    let (watched, hint) = if assignment { ("names", "add `names: [event_type]`") } else { ("calls", "add `calls: [\"*Exception\"]`") };
+    match map.get(watched) {
+        None => report.error(path, format!("missing required key `{watched}`"), Some(hint.into())),
         Some(v) => {
-            for (i, pattern) in string_or_list(v, &format!("{path}.calls"), report).iter().enumerate() {
+            for (i, pattern) in string_or_list(v, &format!("{path}.{watched}"), report).iter().enumerate() {
                 if let Err(err) = Glob::new(pattern) {
-                    report.error(&format!("{path}.calls[{i}]"), format!("invalid pattern `{pattern}`: {}", err.kind()), None);
+                    report.error(&format!("{path}.{watched}[{i}]"), format!("invalid pattern `{pattern}`: {}", err.kind()), None);
                 }
             }
         }
+    }
+    let other = if assignment { "calls" } else { "names" };
+    if map.get(other).is_some() {
+        report.error(&format!("{path}.{other}"), format!("`{other}` belongs to {}", if assignment { "literal_argument" } else { "literal_assignment" }), None);
     }
     match map.get("position") {
         None | Some(Value::Number(_)) => {}
         Some(other) => report.error(&format!("{path}.position"), format!("expected an argument number, found {}", describe(other)), None),
     }
-    match map.get("report_unused") {
-        None | Some(Value::Bool(_)) => {}
-        Some(other) => report.error(&format!("{path}.report_unused"), format!("expected true or false, found {}", describe(other)), None),
+    for key in ["report_unused", "require_literal"] {
+        match map.get(key) {
+            None | Some(Value::Bool(_)) => {}
+            Some(other) => report.error(&format!("{path}.{key}"), format!("expected true or false, found {}", describe(other)), None),
+        }
+    }
+    if let Some(v) = map.get("pattern") {
+        for (i, pattern) in string_or_list(v, &format!("{path}.pattern"), report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{path}.pattern[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    }
+    match map.get("lookup") {
+        None => {}
+        Some(Value::String(s)) if ["value", "prefix"].contains(&s.as_str()) => {}
+        Some(other) => report.error(&format!("{path}.lookup"), format!("expected value or prefix, found {}", other.as_str().map_or_else(|| describe(other).to_string(), |s| format!("`{s}`"))), None),
     }
     let registry_path = format!("{path}.registry");
     match map.get("registry") {
-        None => report.error(path, "missing required key `registry`", Some("add `registry: { file: codes.json, path: \"*\", use: key }`".into())),
+        None => {
+            let shaped = map.get("pattern").is_some() || map.get("require_literal").is_some_and(|v| v.as_bool() == Some(true));
+            if !shaped {
+                report.error(path, "the literal check has nothing to check", Some("add `registry: { file: codes.json, path: \"codes.*\", use: key }`, a `pattern`, or `require_literal: true`".into()));
+            }
+            for key in ["report_unused", "lookup"] {
+                if map.get(key).is_some() {
+                    report.error(&format!("{path}.{key}"), format!("{key} needs a registry"), None);
+                }
+            }
+        }
         Some(registry) => {
             let Some(reg) = expect_mapping(registry, &registry_path, "a mapping with `file` and `path`", report) else { return };
             check_keys(
@@ -236,11 +269,23 @@ pub(super) fn validate_structure_keys(rule: &Mapping, path: &str, checks: &mut u
             report.error(&class_path, "in_class has nothing to apply to", Some("it narrows require_method, require_field and forbid_field".into()));
         }
     }
-    if rule.get("within_function").is_some() && ["forbid_call", "forbid_raise", "require_call"].iter().all(|k| rule.get(*k).is_none()) {
+    const NARROWED: &[&str] = &[
+        "forbid_call",
+        "forbid_raise",
+        "require_call",
+        "forbid_assignment",
+        "forbid_augmented_assignment",
+        "forbid_literal",
+        "require_argument",
+        "forbid_argument",
+        "argument_keys",
+        "allow_raise",
+    ];
+    if rule.get("within_function").is_some() && NARROWED.iter().all(|k| rule.get(*k).is_none()) {
         report.error(
             &format!("{path}.within_function"),
             "within_function has nothing to narrow",
-            Some("it applies to forbid_call, forbid_raise and require_call".into()),
+            Some("it applies to forbid_call, forbid_raise, require_call, assignment, literal, argument and allow_raise checks".into()),
         );
     }
     if rule.get("except_function").is_some() && rule.get("within_function").is_none() {
@@ -250,4 +295,98 @@ pub(super) fn validate_structure_keys(rule: &Mapping, path: &str, checks: &mut u
             Some("add `within_function: [\"*\"]` to start from every function".into()),
         );
     }
+}
+
+/// Keys about single statements and expressions: assignments, comparisons, call arguments and raises.
+pub(super) fn validate_shape_keys(rule: &Mapping, path: &str, checks: &mut usize, report: &mut Report) {
+    let globs = |value: &Value, at: &str, report: &mut Report| {
+        for (i, pattern) in string_or_list(value, at, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{at}[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    };
+    for key in ["forbid_assignment", "forbid_augmented_assignment"] {
+        if let Some(value) = rule.get(key) {
+            *checks += 1;
+            globs(value, &format!("{path}.{key}"), report);
+        }
+    }
+    if let Some(value) = rule.get("forbid_literal") {
+        *checks += 1;
+        let at = format!("{path}.forbid_literal");
+        if let Some(map) = expect_mapping(value, &at, "a mapping like `{ compared: true }`", report) {
+            check_keys(map, &at, &[("compared", "true: a string literal on either side of ==, !=, === or !=="), ("assigned_to", "target glob or list of globs a string literal may not be assigned to, e.g. `[A-Z]*`")], report);
+            match map.get("compared") {
+                None | Some(Value::Bool(_)) => {}
+                Some(other) => report.error(&format!("{at}.compared"), format!("expected true or false, found {}", describe(other)), None),
+            }
+            if let Some(v) = map.get("assigned_to") {
+                globs(v, &format!("{at}.assigned_to"), report);
+            }
+            if map.get("assigned_to").is_none() && map.get("compared").is_none_or(|v| v.as_bool() != Some(true)) {
+                report.error(&at, "forbid_literal has nothing to forbid", Some("add `compared: true` or `assigned_to: [\"[A-Z]*\"]`".into()));
+            }
+        }
+    }
+    for key in ["require_argument", "forbid_argument"] {
+        let Some(value) = rule.get(key) else { continue };
+        *checks += 1;
+        let at = format!("{path}.{key}");
+        let Some(map) = expect_mapping(value, &at, "a mapping with `calls` and `names`", report) else { continue };
+        check_keys(map, &at, &[("calls", "required; call pattern or list of patterns, like forbid_call"), ("names", "required; keyword argument name or list of names")], report);
+        for field in ["calls", "names"] {
+            match map.get(field) {
+                None => report.error(&at, format!("missing required key `{field}`"), None),
+                Some(v) if field == "calls" => globs(v, &format!("{at}.calls"), report),
+                Some(v) => {
+                    string_or_list(v, &format!("{at}.names"), report);
+                }
+            }
+        }
+    }
+    if let Some(value) = rule.get("argument_keys") {
+        *checks += 1;
+        let at = format!("{path}.argument_keys");
+        if let Some(map) = expect_mapping(value, &at, "a mapping with `calls` and `forbid_keys` or `allow_keys`", report) {
+            check_keys(
+                map,
+                &at,
+                &[
+                    ("calls", "required; call pattern or list of patterns"),
+                    ("position", "which positional argument holds the dict, counting from 0 (default 0)"),
+                    ("keyword", "look at the keyword argument with this name instead"),
+                    ("forbid_keys", "key glob or list of globs that may not appear"),
+                    ("allow_keys", "key glob or list of globs; every key must match one"),
+                ],
+                report,
+            );
+            match map.get("calls") {
+                None => report.error(&at, "missing required key `calls`", None),
+                Some(v) => globs(v, &format!("{at}.calls"), report),
+            }
+            for field in ["forbid_keys", "allow_keys"] {
+                if let Some(v) = map.get(field) {
+                    globs(v, &format!("{at}.{field}"), report);
+                }
+            }
+            if map.get("forbid_keys").is_none() && map.get("allow_keys").is_none() {
+                report.error(&at, "argument_keys has nothing to check", Some("add `forbid_keys` or `allow_keys`".into()));
+            }
+        }
+    }
+    if let Some(value) = rule.get("allow_raise") {
+        *checks += 1;
+        let at = format!("{path}.allow_raise");
+        if let Some(map) = expect_mapping(value, &at, "a mapping like `{ subclass_of: LocusException }`", report) {
+            check_keys(map, &at, &[("names", "exception name glob or list of globs"), ("subclass_of", "a class name: it and everything inheriting from it")], report);
+            if let Some(v) = map.get("names") {
+                globs(v, &format!("{at}.names"), report);
+            }
+            if map.get("names").is_none() && map.get("subclass_of").is_none() {
+                report.error(&at, "allow_raise allows nothing", Some("add `names` or `subclass_of`".into()));
+            }
+        }
+    }
+
 }

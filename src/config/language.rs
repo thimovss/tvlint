@@ -83,6 +83,11 @@ impl Language {
             "require_method" | "require_field" | "forbid_field" | "in_class" | "within_function" | "except_function" => {
                 matches!(self, Python | JavaScript | TypeScript)
             }
+            "forbid_assignment" | "forbid_augmented_assignment" | "forbid_literal" | "literal_assignment" | "argument_keys" => {
+                matches!(self, Python | JavaScript | TypeScript)
+            }
+            "allow_raise" => matches!(self, Python | JavaScript | TypeScript),
+            "require_argument" | "forbid_argument" => self == Python,
             _ => true,
         }
     }
@@ -97,6 +102,9 @@ impl Language {
             (Language::Html, _) => "HTML supports forbid_element (tag names), forbid_property (attribute names) and property_value (attribute values)",
             (_, "require_property" | "same_keys_as" | "same_placeholders") => "these checks read JSON, YAML and TOML files",
             (_, "require_method" | "require_field" | "forbid_field" | "in_class") => "class checks exist for Python, JavaScript and TypeScript",
+            (_, "forbid_assignment" | "forbid_augmented_assignment" | "forbid_literal" | "literal_assignment" | "argument_keys") => "assignments, comparisons and dict literals exist for Python, JavaScript and TypeScript",
+            (_, "require_argument" | "forbid_argument") => "only Python has keyword arguments; for JavaScript and TypeScript use argument_keys on an options object",
+            (Language::Rust | Language::Go | Language::Shell, "allow_raise") => "this language has no exceptions to allow",
             (_, "within_function" | "except_function") => "function checks exist for Python, JavaScript and TypeScript",
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""

@@ -98,6 +98,24 @@ pub struct Rule {
     /// Functions that `within_function` leaves out, e.g. `_*` for private ones.
     #[serde(default)]
     pub except_function: Vec<String>,
+    /// Assignment targets, as globs on the target as written (`aggregate.*`), that may not be assigned.
+    #[serde(default)]
+    pub forbid_assignment: Vec<String>,
+    /// Like `forbid_assignment`, for `+=` and the like only.
+    #[serde(default)]
+    pub forbid_augmented_assignment: Vec<String>,
+    /// String literals that may not be compared or assigned to constants.
+    pub forbid_literal: Option<ForbidLiteral>,
+    /// Calls that must pass these keyword arguments.
+    pub require_argument: Option<ArgumentCheck>,
+    /// Calls that must not pass these keyword arguments.
+    pub forbid_argument: Option<ArgumentCheck>,
+    /// Constraints on the keys of a dict literal passed to a call.
+    pub argument_keys: Option<ArgumentKeys>,
+    /// Only these exceptions may be raised.
+    pub allow_raise: Option<AllowRaise>,
+    /// String literals assigned to names must be listed in a data file and/or have a shape.
+    pub literal_assignment: Option<LiteralArgument>,
     /// Every matched file's name must match one of these globs.
     #[serde(default)]
     pub require_filename: Vec<String>,
@@ -128,19 +146,106 @@ pub struct PropertyValue {
     pub require_value: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// String literals that must be listed in a data file and/or have a certain shape. `literal_argument` watches
+/// the arguments of calls (`calls`, `position`); `literal_assignment` watches what is assigned to names (`names`).
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiteralArgument {
     /// Calls whose argument is checked, as patterns like `forbid_call`.
-    #[serde(deserialize_with = "string_or_list")]
+    #[serde(default, deserialize_with = "string_or_list")]
     pub calls: Vec<String>,
+    /// Assignment targets whose value is checked, as globs on the target as written (`event_type`, `self.*`).
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
     /// Which argument, counting from 0.
     #[serde(default)]
     pub position: usize,
-    pub registry: Registry,
-    /// Also report registry entries that no call in scope uses.
+    /// The data file the literals must be listed in.
+    pub registry: Option<Registry>,
+    /// Also report registry entries that nothing in scope uses.
     #[serde(default)]
     pub report_unused: bool,
+    /// Every literal must match one of these globs, e.g. `[a-z]*_failed.[a-z]*`.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub pattern: Vec<String>,
+    /// A watched argument or value that is not a plain string literal (a variable, an f-string) is reported.
+    #[serde(default)]
+    pub require_literal: bool,
+    /// What is looked up in the registry: the literal itself, or the part before its first dot.
+    #[serde(default)]
+    pub lookup: Lookup,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Lookup {
+    #[default]
+    Value,
+    Prefix,
+}
+
+impl Lookup {
+    /// The text looked up in the registry for a literal.
+    pub fn key(self, literal: &str) -> &str {
+        match self {
+            Lookup::Value => literal,
+            Lookup::Prefix => literal.split('.').next().unwrap_or(literal),
+        }
+    }
+}
+
+/// What a call must (`require_argument`) or must not (`forbid_argument`) pass by keyword.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArgumentCheck {
+    /// Calls the check applies to, as patterns like `forbid_call`.
+    #[serde(deserialize_with = "string_or_list")]
+    pub calls: Vec<String>,
+    /// Keyword argument names.
+    #[serde(deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+}
+
+/// Constraints on the keys of a dict or object literal passed to a call.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArgumentKeys {
+    #[serde(deserialize_with = "string_or_list")]
+    pub calls: Vec<String>,
+    /// Which positional argument, counting from 0. Ignored when `keyword` is given.
+    #[serde(default)]
+    pub position: usize,
+    /// Look at the keyword argument with this name instead of a positional one.
+    pub keyword: Option<String>,
+    /// Key globs that may not appear, e.g. `*_id`.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub forbid_keys: Vec<String>,
+    /// Every key must match one of these globs.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub allow_keys: Vec<String>,
+}
+
+/// String literals that may not be compared or assigned.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForbidLiteral {
+    /// A string literal on either side of `==`, `!=`, `===` or `!==`.
+    #[serde(default)]
+    pub compared: bool,
+    /// A string literal assigned to a name matching one of these globs, e.g. `[A-Z]*` for constants.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub assigned_to: Vec<String>,
+}
+
+/// Only these exceptions may be raised.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowRaise {
+    /// Exception name globs, matched on the full dotted name or its last part.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+    /// This class and everything that inherits from it.
+    pub subclass_of: Option<String>,
 }
 
 /// What a registry entry is called: the matched key, the matched scalar, or the scalar's full path.
@@ -185,7 +290,40 @@ pub struct ClassFilter {
     pub names: Vec<String>,
 }
 
+impl ClassFilter {
+    /// `subclasses of X, named *Event`.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(base) = &self.subclass_of {
+            parts.push(format!("subclasses of {base}"));
+        }
+        if !self.names.is_empty() {
+            parts.push(format!("named {}", self.names.join("/")));
+        }
+        parts.join(", ")
+    }
+}
+
 impl Rule {
+    /// Whether the rule has a check that `within_function` can narrow to some functions.
+    pub fn narrowable_by_function(&self) -> bool {
+        !self.forbid_call.is_empty()
+            || !self.forbid_raise.is_empty()
+            || !self.require_call.is_empty()
+            || !self.forbid_assignment.is_empty()
+            || !self.forbid_augmented_assignment.is_empty()
+            || self.forbid_literal.is_some()
+            || self.require_argument.is_some()
+            || self.forbid_argument.is_some()
+            || self.argument_keys.is_some()
+            || self.allow_raise.is_some()
+    }
+
+    /// The literal check, from `literal_argument` or `literal_assignment`.
+    pub fn literal_check(&self) -> Option<&LiteralArgument> {
+        self.literal_argument.as_ref().or(self.literal_assignment.as_ref())
+    }
+
     pub fn has_code_checks(&self) -> bool {
         !self.code_keys().is_empty()
     }
@@ -208,6 +346,14 @@ impl Rule {
             ("same_placeholders", self.same_placeholders),
             ("literal_argument", self.literal_argument.is_some()),
             ("max_lines", self.max_lines.is_some()),
+            ("forbid_assignment", !self.forbid_assignment.is_empty()),
+            ("forbid_augmented_assignment", !self.forbid_augmented_assignment.is_empty()),
+            ("forbid_literal", self.forbid_literal.is_some()),
+            ("require_argument", self.require_argument.is_some()),
+            ("forbid_argument", self.forbid_argument.is_some()),
+            ("argument_keys", self.argument_keys.is_some()),
+            ("allow_raise", self.allow_raise.is_some()),
+            ("literal_assignment", self.literal_assignment.is_some()),
             ("require_call", !self.require_call.is_empty()),
             ("require_method", !self.require_method.is_empty()),
             ("require_field", !self.require_field.is_empty()),
@@ -281,14 +427,60 @@ impl Rule {
             let what = if self.same_placeholders { "keys and {{placeholders}}" } else { "keys" };
             out.push(format!("files whose {what} differ from {reference}"));
         }
-        if let Some(arg) = &self.literal_argument {
+        if let Some(arg) = self.literal_check() {
+            let what = if self.literal_assignment.is_some() {
+                format!("values assigned to {}", arg.names.join("/"))
+            } else {
+                format!("argument {} of {}", arg.position, arg.calls.join("/"))
+            };
+            let mut problems = Vec::new();
+            if arg.require_literal {
+                problems.push("that is not a plain string literal".to_string());
+            }
+            if !arg.pattern.is_empty() {
+                problems.push(format!("that does not match {}", arg.pattern.join(", ")));
+            }
+            if let Some(registry) = &arg.registry {
+                let of = if arg.lookup == Lookup::Prefix { " (by the part before the dot)" } else { "" };
+                problems.push(format!("that is not in {}{of}", registry.file));
+            }
             let unused = if arg.report_unused { ", and entries nothing uses" } else { "" };
-            out.push(format!(
-                "argument {} of {} that is not in {}{unused}",
-                arg.position,
-                arg.calls.join("/"),
-                arg.registry.file
-            ));
+            out.push(format!("{what} {}{unused}", problems.join(" or ")));
+        }
+        if !self.forbid_assignment.is_empty() {
+            out.push(format!("assigning to {}", self.forbid_assignment.join(", ")));
+        }
+        if !self.forbid_augmented_assignment.is_empty() {
+            out.push(format!("augmented assignment (`+=`) to {}", self.forbid_augmented_assignment.join(", ")));
+        }
+        if let Some(lit) = &self.forbid_literal {
+            if lit.compared {
+                out.push("comparing with a string literal".to_string());
+            }
+            if !lit.assigned_to.is_empty() {
+                out.push(format!("assigning a string literal to {}", lit.assigned_to.join(", ")));
+            }
+        }
+        if let Some(check) = &self.require_argument {
+            out.push(format!("calls to {} without the keyword {}", check.calls.join("/"), check.names.join(", ")));
+        }
+        if let Some(check) = &self.forbid_argument {
+            out.push(format!("calls to {} that pass the keyword {}", check.calls.join("/"), check.names.join(", ")));
+        }
+        if let Some(keys) = &self.argument_keys {
+            let mut parts = Vec::new();
+            if !keys.forbid_keys.is_empty() {
+                parts.push(format!("the keys {}", keys.forbid_keys.join(", ")));
+            }
+            if !keys.allow_keys.is_empty() {
+                parts.push(format!("keys other than {}", keys.allow_keys.join(", ")));
+            }
+            out.push(format!("{} in the dict passed to {}", parts.join(" or "), keys.calls.join("/")));
+        }
+        if let Some(allow) = &self.allow_raise {
+            let mut parts = allow.names.clone();
+            parts.extend(allow.subclass_of.iter().map(|c| format!("{c} and its subclasses")));
+            out.push(format!("raising anything but {}", parts.join(", ")));
         }
         if !self.within_property.is_empty() {
             out.push(format!("(only inside a property named {})", self.within_property.join(", ")));
@@ -297,16 +489,7 @@ impl Rule {
             let scope = if self.within_function.is_empty() { "files" } else { "functions" };
             out.push(format!("{scope} that never call {}", self.require_call.join(", ")));
         }
-        let classes = self.in_class.as_ref().map_or_else(String::new, |c| {
-            let mut parts = Vec::new();
-            if let Some(base) = &c.subclass_of {
-                parts.push(format!("subclasses of {base}"));
-            }
-            if !c.names.is_empty() {
-                parts.push(format!("named {}", c.names.join("/")));
-            }
-            format!(" (classes: {})", parts.join(", "))
-        });
+        let classes = self.in_class.as_ref().map_or_else(String::new, |c| format!(" (classes: {})", c.describe()));
         if !self.require_method.is_empty() {
             out.push(format!("classes without the method {}{classes}", self.require_method.join(", ")));
         }

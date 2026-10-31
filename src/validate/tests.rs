@@ -379,3 +379,36 @@ fn reports_class_and_function_rule_mistakes() {
     let found = rule_errors("    require_call: [x]\n");
     assert!(has(&found, "rules.r", "missing required key `language`"), "{found:?}");
 }
+
+#[test]
+fn accepts_statement_and_expression_rules() {
+    assert!(rule_errors("    language: python\n    forbid_assignment: [\"aggregate.*\"]\n    forbid_augmented_assignment: [\"a.*\"]\n").is_empty());
+    assert!(rule_errors("    language: python\n    forbid_literal: { compared: true, assigned_to: [\"[A-Z]*\"] }\n").is_empty());
+    assert!(rule_errors("    language: python\n    require_argument: { calls: [\"*.from_aggregate_id\"], names: account_id }\n    forbid_argument: { calls: [apply_event], names: [aggregate] }\n").is_empty());
+    assert!(rule_errors("    language: python\n    argument_keys: { calls: [Err], position: 1, forbid_keys: [\"*_id\"] }\n").is_empty());
+    assert!(rule_errors("    language: [python, typescript]\n    allow_raise: { subclass_of: LocusException, names: [NotImplementedError] }\n").is_empty());
+    assert!(rule_errors("    language: python\n    literal_argument: { calls: [Err], pattern: \"[a-z]*_failed.[a-z]*\", require_literal: true }\n").is_empty());
+    assert!(rule_errors("    language: python\n    literal_assignment: { names: [event_type], registry: { file: t.json, path: \"*\" }, lookup: prefix }\n").is_empty());
+}
+
+#[test]
+fn reports_statement_and_expression_rule_mistakes() {
+    let found = rule_errors("    language: python\n    forbid_literal: {}\n");
+    assert!(has(&found, "rules.r.forbid_literal", "nothing to forbid"), "{found:?}");
+    let found = rule_errors("    language: python\n    require_argument: { calls: [f] }\n");
+    assert!(has(&found, "rules.r.require_argument", "missing required key `names`"), "{found:?}");
+    let found = rule_errors("    language: typescript\n    require_argument: { calls: [f], names: [a] }\n");
+    assert!(has(&found, "rules.r.require_argument", "not supported for typescript"), "{found:?}");
+    let found = rule_errors("    language: python\n    argument_keys: { calls: [f] }\n");
+    assert!(has(&found, "rules.r.argument_keys", "nothing to check"), "{found:?}");
+    let found = rule_errors("    language: python\n    allow_raise: {}\n");
+    assert!(has(&found, "rules.r.allow_raise", "allows nothing"), "{found:?}");
+    let found = rule_errors("    language: rust\n    allow_raise: { names: [X] }\n");
+    assert!(has(&found, "rules.r.allow_raise", "not supported for rust"), "{found:?}");
+    let found = rule_errors("    language: python\n    literal_argument: { calls: [Err] }\n");
+    assert!(has(&found, "rules.r.literal_argument", "nothing to check"), "{found:?}");
+    let found = rule_errors("    language: python\n    literal_argument: { names: [x], pattern: a }\n");
+    assert!(has(&found, "rules.r.literal_argument", "missing required key `calls`"), "{found:?}");
+    let found = rule_errors("    language: python\n    literal_argument: { calls: [f], pattern: a, lookup: suffix }\n");
+    assert!(has(&found, "rules.r.literal_argument.lookup", "value or prefix"), "{found:?}");
+}

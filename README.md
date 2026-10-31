@@ -278,6 +278,95 @@ rules:
 - `report_unused` reports each entry that no call in the rule's scope passes, in the registry file, at the entry. With `--staged` or `PATH` arguments the usage is still collected from the whole scope, and the entries are reported only if the registry file is selected.
 - The registry file must exist and be JSON, YAML or TOML (`validate` checks, and warns when `path` selects nothing).
 
+The registry is optional. The same block can check the shape of the literal, or that it is a literal at all:
+
+```yaml
+rules:
+  error-codes-have-a-shape:
+    language: python
+    literal_argument:
+      calls: ["*Exception"]
+      pattern: "[a-z]*_failed.[a-z]*"   # globs; the literal must match one
+      require_literal: true             # a variable or f-string is reported instead of skipped
+    rationale: The code is read statically.
+    fix: Pass a literal "<action>_failed.<reason>".
+
+  error-prefixes-are-translated:
+    language: python
+    literal_argument:
+      calls: ["*Exception"]
+      registry: { file: frontend/src/locales/en.json, path: "*", use: key }
+      lookup: prefix                    # look up "contract_creation_failed", the part before the first dot
+    rationale: The toast title is the translated prefix.
+    fix: Translate the prefix in every locale.
+
+  event-types-are-registered:
+    language: python
+    literal_assignment:                 # the same checks for values assigned to names
+      names: [event_type]
+      registry: { file: event_types.json, path: "*" }
+      report_unused: true
+    rationale: Event types are stored forever, so each one is written down.
+    fix: Add the event type to event_types.json.
+```
+
+- `pattern` globs match the whole literal. `lookup: prefix` takes the part before the first dot (the whole literal if it has none). Without a registry, `report_unused` and `lookup` are errors.
+- `literal_assignment` watches `names`, globs on the assignment target as written (`event_type`, `self.*`). Declarations count (`event_type: ClassVar[str] = "..."`, `const KIND = "..."`).
+
+## Statements and expressions
+
+Some rules are about one statement or expression: what is assigned, what a string is compared with, which keywords a call passes, what is raised. Each takes `within_function` and `except_function` like `forbid_call`.
+
+```yaml
+rules:
+  state-changes-only-in-apply:
+    language: python
+    forbid_assignment: ["aggregate.*", "asset.*"]
+    within_function: ["*"]
+    except_function: [apply]
+    rationale: State changes only through DomainEvent.apply().
+    fix: Emit an event and change the state in its apply().
+
+  no-in-place-updates-in-apply:
+    language: python
+    forbid_augmented_assignment: ["aggregate.*"]   # += is not idempotent when an event is delivered twice
+    within_function: [apply]
+    rationale: Events are delivered at least once, so apply() must give the same result when it runs twice.
+    fix: Assign the final value, computed from the event.
+
+  enums-not-strings:
+    language: python
+    forbid_literal:
+      compared: true             # if x.status == "active"
+      assigned_to: ["[A-Z]*"]    # STATUS_ACTIVE = "active"
+    rationale: A typo in a string is silent.
+    fix: Use an Enum or a Literal type.
+
+  load-checks-the-tenant:
+    language: python
+    require_argument: { calls: ["*.from_aggregate_id"], names: [account_id] }
+    rationale: A command must only load aggregates of the caller's account.
+    fix: Pass account_id=account_id.
+
+  error-parameters-are-for-people:
+    language: python
+    argument_keys: { calls: ["*Exception"], position: 1, forbid_keys: ["*_id", "*[A-Z]*"] }
+    rationale: Parameters are shown to the user in a translated message.
+    fix: Pass names and titles in snake_case, never ids.
+
+  commands-raise-locus-exceptions:
+    language: python
+    allow_raise: { subclass_of: LocusException }
+    rationale: The global handler turns a LocusException into the standard error body.
+    fix: Raise a LocusException subclass with a code.
+```
+
+- **Targets** are matched as written. `aggregate.name = x` is `aggregate.name`, `a.items[0] = x` is `a.items[]`, and a tuple target (`a, b = ...`) is not checked. A name that is not a plain identifier, attribute or index is `?`.
+- **`forbid_assignment` also reports `+=`**; `forbid_augmented_assignment` is for rules that only mind in-place updates. Annotated names without a value (`x: int`) assign nothing.
+- **Comparisons** look only at `==`, `!=`, `===` and `!==`. `<`, `in` and f-strings are left alone.
+- **Keyword arguments** exist in Python only. `argument_keys` reads dict literals in Python and object literals in JavaScript and TypeScript; it skips keys that are not plain strings and a dict built elsewhere. With `keyword: parameters` it looks at that keyword argument instead of a position.
+- **`allow_raise`** follows `subclass_of` through the project's own classes, like `in_class`.
+
 ## Classes and functions
 
 Some rules are about what a class declares or what a function does, not about what a file imports. Python, JavaScript and TypeScript can express them; the rule reads the same in each.
@@ -377,7 +466,14 @@ scopes:
 | `require_property` | JSON, YAML and TOML. Key paths that must exist, e.g. `jobs.*.timeout-minutes`: every place the parent path (`jobs.*`) matches must contain the key. |
 | `same_keys_as` | JSON, YAML and TOML. Path to a reference file. Every file in the rule's scope must have exactly its keys: missing and extra keys are reported. The reference itself is skipped. |
 | `same_placeholders` | JSON, YAML and TOML. `true` also requires each shared message to use the same `{{name}}` / `{name}` placeholders as the reference. Needs `same_keys_as`. |
-| `literal_argument` | Python, JavaScript, TypeScript and Rust. String literals passed to calls must be listed in a data file, see [Code that must match a data file](#code-that-must-match-a-data-file). |
+| `literal_argument` | Python, JavaScript, TypeScript and Rust. String literals passed to calls must be listed in a data file and/or have a shape, see [Code that must match a data file](#code-that-must-match-a-data-file). |
+| `literal_assignment` | Python, JavaScript and TypeScript. The same checks for string literals assigned to names (`event_type = "asset.renamed"`): `names` instead of `calls`. A rule has one or the other. |
+| `forbid_assignment` | Python, JavaScript and TypeScript. Target globs that may not be assigned, matched on the target as written: `aggregate.name`, `self.items[]` (`[]` is any index). `+=` counts. Declarations (`const x = 1`) do not. See [Statements and expressions](#statements-and-expressions). |
+| `forbid_augmented_assignment` | Python, JavaScript and TypeScript. Target globs that may not be changed in place with `+=`, `-=` and the like. |
+| `forbid_literal` | Python, JavaScript and TypeScript. `compared: true` forbids a string literal on either side of `==`, `!=`, `===` and `!==`; `assigned_to: [globs]` forbids assigning one to a matching name, e.g. `[A-Z]*` for constants. |
+| `require_argument` / `forbid_argument` | Python. `calls` and `names`: every matching call must (or must not) pass these keyword arguments. A call with `**kwargs` is skipped by `require_argument`. |
+| `argument_keys` | Python, JavaScript and TypeScript. `calls`, `position` (or `keyword`) and `forbid_keys` / `allow_keys`: the keys of a dict or object literal passed to a call. |
+| `allow_raise` | Python, JavaScript and TypeScript. `names` and/or `subclass_of`: nothing else may be raised. A name that does not start with a capital is a variable (`raise error`) and is left alone; a bare re-raise is fine. |
 | `within_property` | JavaScript and TypeScript. Narrows `forbid_call`, `forbid_raise` and `forbid_element` to hits that sit inside an object-literal property with one of these names, e.g. `onError`. |
 | `require_call` | Python, JavaScript, TypeScript, Rust, Go and shell. Call patterns, written as in `forbid_call`: at least one must be called in each file in scope, or, with `within_function`, in each function it selects. A file without one is reported on line 1, a function on its `def` line. See [Classes and functions](#classes-and-functions). |
 | `require_method` | Python, JavaScript and TypeScript. Method name globs that every selected class must declare in its own body. Inherited methods do not count. |

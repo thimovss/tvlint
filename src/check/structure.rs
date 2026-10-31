@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use tree_sitter::Node;
 
 use crate::adapters::Adapter;
+use super::compile::CompiledClassFilter;
 use super::{CompiledRule, Project, visit};
 
 /// Whether `node` sits inside a function the rule's `within_function` selects.
@@ -47,6 +48,16 @@ pub(super) fn class_scope(rule: &CompiledRule, adapter: &dyn Adapter, ctx: &Proj
     Some(ctx.index.subclasses_of(adapter.class_family()?, root))
 }
 
+/// Whether the class called `name` is one the filter selects. `subclasses` is what `subclasses` returned.
+pub(super) fn selects(filter: &CompiledClassFilter, name: &str, subclasses: Option<&BTreeSet<String>>) -> bool {
+    if let Some(root) = filter.subclass_of
+        && (name == root || !subclasses.is_some_and(|s| s.contains(name)))
+    {
+        return false;
+    }
+    !filter.has_names || filter.names.is_match(name)
+}
+
 /// `require_method`, `require_field` and `forbid_field` applied to one class.
 pub(super) fn check_class(
     rule: &CompiledRule,
@@ -60,15 +71,10 @@ pub(super) fn check_class(
         return;
     }
     let (Some((name, _)), Some(members)) = (adapter.class_bases(node, src), adapter.class_members(node, src)) else { return };
-    if let Some(filter) = &rule.class_filter {
-        if let Some(root) = filter.subclass_of
-            && (name == root || !subclasses.is_some_and(|s| s.contains(&name)))
-        {
-            return;
-        }
-        if filter.has_names && !filter.names.is_match(&name) {
-            return;
-        }
+    if let Some(filter) = &rule.class_filter
+        && !selects(filter, &name, subclasses)
+    {
+        return;
     }
     for wanted in &rule.require_method {
         if !members.methods.iter().any(|m| wanted.matcher.is_match(m)) {

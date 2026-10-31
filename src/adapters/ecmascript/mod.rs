@@ -4,7 +4,7 @@ mod tsconfig;
 
 use tree_sitter::Node;
 
-use super::{Adapter, ClassMembers, ImportRef, Member, Property, first_named_child, last_segment, relative_path, text};
+use super::{Adapter, Assignment, ClassMembers, Comparison, ImportRef, Member, Property, first_named_child, last_segment, relative_path, text};
 use crate::check::Project;
 
 pub use tsconfig::TsConfigs;
@@ -147,6 +147,54 @@ impl Adapter for EcmaScript {
             }
         }
         Some(members)
+    }
+
+    fn assignment<'t>(&self, node: Node<'t>, src: &str) -> Option<Assignment<'t>> {
+        let (augmented, declaration) = match node.kind() {
+            "assignment_expression" => (false, false),
+            "augmented_assignment_expression" => (true, false),
+            "variable_declarator" => (false, true),
+            _ => return None,
+        };
+        let target = node.child_by_field_name(if declaration { "name" } else { "left" })?;
+        let value = node.child_by_field_name(if declaration { "value" } else { "right" });
+        if declaration && value.is_none() {
+            return None;
+        }
+        let target = match target.kind() {
+            "identifier" | "member_expression" => es_dotted_name(target, src).unwrap_or_else(|| "?".to_string()),
+            "subscript_expression" => format!("{}[]", es_dotted_name(target.child_by_field_name("object")?, src).unwrap_or_else(|| "?".to_string())),
+            _ => return None,
+        };
+        Some(Assignment { target, augmented, declaration, value })
+    }
+
+    fn comparison<'t>(&self, node: Node<'t>, src: &str) -> Option<Comparison<'t>> {
+        if node.kind() != "binary_expression" {
+            return None;
+        }
+        let operator = text(node.child_by_field_name("operator")?, src);
+        if !matches!(operator, "==" | "===" | "!=" | "!==" | "<" | "<=" | ">" | ">=" | "instanceof" | "in") {
+            return None;
+        }
+        Some(Comparison { operators: vec![operator.to_string()], operands: vec![node.child_by_field_name("left")?, node.child_by_field_name("right")?] })
+    }
+
+    /// `{ key: value }`; computed keys and spreads are left out.
+    fn dict_entries<'t>(&self, node: Node<'t>, src: &str) -> Option<Vec<(String, Node<'t>)>> {
+        if node.kind() != "object" {
+            return None;
+        }
+        let mut cursor = node.walk();
+        let entries = node
+            .named_children(&mut cursor)
+            .filter_map(|member| match member.kind() {
+                "pair" => Some((Self::key_name(member.child_by_field_name("key")?, src)?, member.child_by_field_name("key")?)),
+                "shorthand_property_identifier" => Some((text(member, src).to_string(), member)),
+                _ => None,
+            })
+            .collect();
+        Some(entries)
     }
 
     /// Function declarations, methods, and `const f = () => ...` (named after the variable).

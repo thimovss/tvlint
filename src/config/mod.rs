@@ -7,9 +7,11 @@ mod rule;
 pub use captures::{CapturePattern, fill as fill_placeholders};
 
 pub use language::Language;
-pub use rule::{Rule, Use};
+pub use rule::{ArgumentCheck, ClassFilter, Lookup, Rule, Use};
 #[cfg(test)]
-pub use rule::{ClassFilter, ClassSelector, LiteralArgument, PropertyValue, Registry};
+pub use rule::{AllowRaise, ArgumentKeys, ForbidLiteral};
+#[cfg(test)]
+pub use rule::{ClassSelector, LiteralArgument, PropertyValue, Registry};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -122,8 +124,10 @@ impl Config {
             if let Some(file) = &mut rule.same_keys_as {
                 *file = join(dir, file);
             }
-            if let Some(arg) = &mut rule.literal_argument {
-                arg.registry.file = join(dir, &arg.registry.file);
+            for arg in [&mut rule.literal_argument, &mut rule.literal_assignment].into_iter().flatten() {
+                if let Some(registry) = &mut arg.registry {
+                    registry.file = join(dir, &registry.file);
+                }
             }
         }
         for target in self.aliases.values_mut() {
@@ -143,7 +147,7 @@ impl Config {
                 bail!("rule id `{id}` {problem}");
             }
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
-                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, max_lines, require_call, require_method, require_field, forbid_field or require_filename)");
+                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, literal_assignment, max_lines, require_call, require_method, require_field, forbid_field, forbid_assignment, forbid_augmented_assignment, forbid_literal, require_argument, forbid_argument, argument_keys, allow_raise or require_filename)");
             }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
@@ -191,8 +195,8 @@ impl Config {
                     bail!("rule `{id}`: in_class needs subclass_of or names (leave it out to check every class)");
                 }
             }
-            if !rule.within_function.is_empty() && rule.forbid_call.is_empty() && rule.forbid_raise.is_empty() && rule.require_call.is_empty() {
-                bail!("rule `{id}`: within_function needs forbid_call, forbid_raise or require_call");
+            if !rule.within_function.is_empty() && !rule.narrowable_by_function() {
+                bail!("rule `{id}`: within_function narrows forbid_call, forbid_raise, require_call, assignment, literal, argument and allow_raise checks, and the rule has none");
             }
             if !rule.except_function.is_empty() && rule.within_function.is_empty() {
                 bail!("rule `{id}`: except_function needs within_function (use `within_function: [\"*\"]` for every function)");
@@ -200,10 +204,56 @@ impl Config {
             if rule.same_placeholders && rule.same_keys_as.is_none() {
                 bail!("rule `{id}`: same_placeholders needs same_keys_as");
             }
-            if let Some(arg) = &rule.literal_argument
-                && arg.calls.is_empty()
+            if rule.literal_argument.is_some() && rule.literal_assignment.is_some() {
+                bail!("rule `{id}`: literal_argument and literal_assignment cannot share a rule; make one rule for each");
+            }
+            if let Some(arg) = &rule.literal_argument {
+                if arg.calls.is_empty() {
+                    bail!("rule `{id}`: literal_argument needs at least one call in `calls`");
+                }
+                if !arg.names.is_empty() {
+                    bail!("rule `{id}`: literal_argument watches `calls`; `names` belongs to literal_assignment");
+                }
+            }
+            if let Some(arg) = &rule.literal_assignment {
+                if arg.names.is_empty() {
+                    bail!("rule `{id}`: literal_assignment needs at least one name in `names`");
+                }
+                if !arg.calls.is_empty() || arg.position != 0 {
+                    bail!("rule `{id}`: literal_assignment watches `names`; `calls` and `position` belong to literal_argument");
+                }
+            }
+            if let Some(arg) = rule.literal_check() {
+                if arg.registry.is_none() && arg.pattern.is_empty() && !arg.require_literal {
+                    bail!("rule `{id}`: the literal check has nothing to check; give it a `registry`, a `pattern` or `require_literal: true`");
+                }
+                if arg.registry.is_none() && (arg.report_unused || arg.lookup != Lookup::Value) {
+                    bail!("rule `{id}`: report_unused and lookup need a registry");
+                }
+            }
+            if let Some(lit) = &rule.forbid_literal
+                && !lit.compared
+                && lit.assigned_to.is_empty()
             {
-                bail!("rule `{id}`: literal_argument needs at least one call in `calls`");
+                bail!("rule `{id}`: forbid_literal needs `compared: true` or `assigned_to`");
+            }
+            for (key, check) in [("require_argument", &rule.require_argument), ("forbid_argument", &rule.forbid_argument)] {
+                if let Some(check) = check
+                    && (check.calls.is_empty() || check.names.is_empty())
+                {
+                    bail!("rule `{id}`: {key} needs `calls` and `names`");
+                }
+            }
+            if let Some(keys) = &rule.argument_keys
+                && (keys.calls.is_empty() || (keys.forbid_keys.is_empty() && keys.allow_keys.is_empty()))
+            {
+                bail!("rule `{id}`: argument_keys needs `calls` and `forbid_keys` or `allow_keys`");
+            }
+            if let Some(allow) = &rule.allow_raise
+                && allow.names.is_empty()
+                && allow.subclass_of.is_none()
+            {
+                bail!("rule `{id}`: allow_raise needs `names` or `subclass_of`");
             }
         }
         for scope in &self.scopes {

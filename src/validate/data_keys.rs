@@ -70,8 +70,10 @@ pub(super) fn validate_data_keys(rule: &Mapping, path: &str, languages: &[String
             report.error(&format!("{path}.same_placeholders"), "same_placeholders needs same_keys_as", Some("add `same_keys_as: <reference file>`".into()));
         }
     }
-    if let Some(value) = rule.get("literal_argument") {
-        *checks += 1;
-        validate_literal_argument(value, &format!("{path}.literal_argument"), report);
+    for key in ["literal_argument", "literal_assignment"] {
+        if let Some(value) = rule.get(key) {
+            *checks += 1;
+            validate_literal_argument(value, &format!("{path}.{key}"), key == "literal_assignment", report);
+        }
     }
 }

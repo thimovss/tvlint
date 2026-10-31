@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 
-use crate::config::{Rule, Use};
+use crate::config::{ClassFilter, Lookup, Rule, Use};
 use crate::data::{PathPattern, Position};
 use super::Project;
 
@@ -32,6 +32,14 @@ pub struct CompiledRule<'a> {
     pub(super) require_field: Vec<NamedGlob>,
     pub(super) forbid_field: GlobSet,
     pub(super) class_filter: Option<CompiledClassFilter<'a>>,
+    pub(super) assign: GlobSet,
+    pub(super) augmented: GlobSet,
+    pub(super) literal_compared: bool,
+    pub(super) literal_assigned: GlobSet,
+    pub(super) require_argument: Option<CompiledArguments>,
+    pub(super) forbid_argument: Option<CompiledArguments>,
+    pub(super) argument_keys: Option<CompiledKeys>,
+    pub(super) allow_raise: Option<CompiledAllowRaise<'a>>,
     pub(super) property: HashSet<&'a str>,
     pub(super) within: HashSet<&'a str>,
     pub(super) property_value: Option<CompiledPropertyValue<'a>>,
@@ -74,28 +82,67 @@ pub(super) struct RequiredProperty {
     pub(super) text: String,
 }
 
-pub struct CompiledLiteral {
+pub(super) struct CompiledArguments {
+    pub(super) calls: GlobSet,
+    pub(super) names: Vec<String>,
+}
+
+pub(super) struct CompiledKeys {
     pub(super) calls: GlobSet,
     pub(super) position: usize,
-    pub file: String,
-    pub(super) registry_path: PathPattern,
-    pub(super) use_: Use,
+    pub(super) keyword: Option<String>,
+    pub(super) forbid: GlobSet,
+    pub(super) allow: GlobSet,
+    pub(super) allow_text: Vec<String>,
+}
+
+pub(super) struct CompiledAllowRaise<'a> {
+    pub(super) names: GlobSet,
+    pub(super) names_text: Vec<String>,
+    pub(super) subclass_of: Option<&'a str>,
+}
+
+pub struct CompiledLiteral {
+    /// The watched calls (`literal_argument`) or assignment targets (`literal_assignment`).
+    pub(super) watched: GlobSet,
+    pub(super) assignment: bool,
+    pub(super) position: usize,
+    /// The registry file, if the literals must be listed in one.
+    pub file: Option<String>,
+    registry_path: Option<PathPattern>,
+    use_: Use,
     pub report_unused: bool,
-    pub(super) entries: OnceLock<BTreeMap<String, Position>>,
+    pub(super) pattern: GlobSet,
+    pub(super) pattern_text: Vec<String>,
+    pub(super) require_literal: bool,
+    pub(super) lookup: Lookup,
+    entries: OnceLock<BTreeMap<String, Position>>,
 }
 
 impl CompiledLiteral {
     /// The allowed values, by where they are defined in the registry file.
     pub fn entries(&self, ctx: &Project) -> &BTreeMap<String, Position> {
-        self.entries.get_or_init(|| ctx.docs.get(&self.file).map(|doc| doc.registry(&self.registry_path, self.use_)).unwrap_or_default())
+        self.entries.get_or_init(|| {
+            let (Some(file), Some(path)) = (&self.file, &self.registry_path) else { return BTreeMap::new() };
+            ctx.docs.get(file).map(|doc| doc.registry(path, self.use_)).unwrap_or_default()
+        })
     }
 }
 
-/// A string literal passed as an argument that a `literal_argument` rule watches.
+/// A value a `literal_argument` or `literal_assignment` rule watches: `None` when it is not a plain string literal.
 pub struct Literal {
-    pub value: String,
+    pub value: Option<String>,
     pub at: Position,
-    pub callee: String,
+    /// The call, or the assignment target.
+    pub watched: String,
+}
+
+fn compile_class_filter(filter: &ClassFilter) -> Result<CompiledClassFilter<'_>> {
+    Ok(CompiledClassFilter { subclass_of: filter.subclass_of.as_deref(), names: compile(&filter.names)?, has_names: !filter.names.is_empty() })
+}
+
+fn compile_arguments(check: &crate::config::ArgumentCheck) -> Result<CompiledArguments> {
+    Ok(CompiledArguments { calls: compile(&check.calls)?, names: check.names.clone() })
 }
 
 pub(super) struct CompiledPropertyValue<'a> {
@@ -151,21 +198,55 @@ impl<'a> CompiledRule<'a> {
                 .collect::<Result<_>>()?,
             reference: rule.same_keys_as.as_deref().map(normalize_file),
             literal: rule
-                .literal_argument
-                .as_ref()
+                .literal_check()
                 .map(|arg| -> Result<CompiledLiteral> {
+                    let assignment = rule.literal_assignment.is_some();
                     Ok(CompiledLiteral {
-                        calls: compile(&arg.calls)?,
+                        watched: compile(if assignment { &arg.names } else { &arg.calls })?,
+                        assignment,
                         position: arg.position,
-                        file: normalize_file(&arg.registry.file),
-                        registry_path: PathPattern::parse(&arg.registry.path)?,
-                        use_: arg.registry.use_,
+                        file: arg.registry.as_ref().map(|r| normalize_file(&r.file)),
+                        registry_path: arg.registry.as_ref().map(|r| PathPattern::parse(&r.path)).transpose()?,
+                        use_: arg.registry.as_ref().map_or(Use::Value, |r| r.use_),
                         report_unused: arg.report_unused,
+                        pattern: compile(&arg.pattern)?,
+                        pattern_text: arg.pattern.clone(),
+                        require_literal: arg.require_literal,
+                        lookup: arg.lookup,
                         entries: OnceLock::new(),
                     })
                 })
                 .transpose()
-                .with_context(|| format!("rule `{id}` literal_argument"))?,
+                .with_context(|| format!("rule `{id}` literal check"))?,
+            assign: compile(&rule.forbid_assignment).with_context(|| format!("rule `{id}` forbid_assignment"))?,
+            augmented: compile(&rule.forbid_augmented_assignment).with_context(|| format!("rule `{id}` forbid_augmented_assignment"))?,
+            literal_compared: rule.forbid_literal.as_ref().is_some_and(|l| l.compared),
+            literal_assigned: compile(rule.forbid_literal.as_ref().map_or(&[][..], |l| &l.assigned_to)).with_context(|| format!("rule `{id}` forbid_literal"))?,
+            require_argument: rule.require_argument.as_ref().map(compile_arguments).transpose().with_context(|| format!("rule `{id}` require_argument"))?,
+            forbid_argument: rule.forbid_argument.as_ref().map(compile_arguments).transpose().with_context(|| format!("rule `{id}` forbid_argument"))?,
+            argument_keys: rule
+                .argument_keys
+                .as_ref()
+                .map(|k| -> Result<CompiledKeys> {
+                    Ok(CompiledKeys {
+                        calls: compile(&k.calls)?,
+                        position: k.position,
+                        keyword: k.keyword.clone(),
+                        forbid: compile(&k.forbid_keys)?,
+                        allow: compile(&k.allow_keys)?,
+                        allow_text: k.allow_keys.clone(),
+                    })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` argument_keys"))?,
+            allow_raise: rule
+                .allow_raise
+                .as_ref()
+                .map(|a| -> Result<CompiledAllowRaise> {
+                    Ok(CompiledAllowRaise { names: compile(&a.names)?, names_text: a.names.clone(), subclass_of: a.subclass_of.as_deref() })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` allow_raise"))?,
             id,
             rule,
             base: String::new(),
@@ -186,13 +267,7 @@ impl<'a> CompiledRule<'a> {
             class_filter: rule
                 .in_class
                 .as_ref()
-                .map(|filter| -> Result<CompiledClassFilter> {
-                    Ok(CompiledClassFilter {
-                        subclass_of: filter.subclass_of.as_deref(),
-                        names: compile(&filter.names)?,
-                        has_names: !filter.names.is_empty(),
-                    })
-                })
+                .map(compile_class_filter)
                 .transpose()
                 .with_context(|| format!("rule `{id}` in_class"))?,
             property: rule.forbid_property.iter().map(String::as_str).collect(),

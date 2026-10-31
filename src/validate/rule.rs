@@ -5,7 +5,7 @@ use serde_yaml_ng::{Mapping, Value};
 
 use crate::config::Language;
 
-use super::code_keys::{validate_ecmascript_keys, validate_structure_keys};
+use super::code_keys::{validate_ecmascript_keys, validate_shape_keys, validate_structure_keys};
 use super::data_keys::validate_data_keys;
 use super::keys::{LANGUAGES, RULE_KEYS};
 use super::report::Report;
@@ -34,6 +34,14 @@ pub(super) fn validate_rule(path: &str, value: &Value, report: &mut Report) {
         "require_method",
         "require_field",
         "forbid_field",
+        "literal_assignment",
+        "forbid_assignment",
+        "forbid_augmented_assignment",
+        "forbid_literal",
+        "require_argument",
+        "forbid_argument",
+        "argument_keys",
+        "allow_raise",
     ]
     .iter()
     .any(|k| rule.get(*k).is_some());
@@ -102,12 +110,13 @@ pub(super) fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     validate_language_support(rule, path, &languages, report);
     validate_ecmascript_keys(rule, path, &mut checks, report);
     validate_structure_keys(rule, path, &mut checks, report);
+    validate_shape_keys(rule, path, &mut checks, report);
     validate_data_keys(rule, path, &languages, &mut checks, report);
     if checks == 0 {
         report.error(
             path,
             "the rule has no checks, so it can never report anything",
-            Some("add at least one check: forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, max_lines, require_call, require_method, require_field, forbid_field or require_filename".into()),
+            Some("add at least one check: forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, max_lines, require_call, require_method, require_field, forbid_field, forbid_assignment, forbid_literal, require_argument, argument_keys, allow_raise or require_filename".into()),
         );
     }
 }
@@ -133,6 +142,14 @@ pub(super) fn validate_language_support(rule: &Mapping, path: &str, languages: &
         "in_class",
         "within_function",
         "except_function",
+        "forbid_assignment",
+        "forbid_augmented_assignment",
+        "forbid_literal",
+        "literal_assignment",
+        "argument_keys",
+        "allow_raise",
+        "require_argument",
+        "forbid_argument",
     ];
     for key in KEYS.iter().filter(|k| rule.get(**k).is_some()) {
         for language in languages.iter().filter_map(|l| Language::from_name(l)) {

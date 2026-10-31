@@ -174,8 +174,9 @@ fn literal_rule_for(language: Language, calls: &[&str], position: usize, use_: U
         literal_argument: Some(crate::config::LiteralArgument {
             calls: calls.iter().map(|s| s.to_string()).collect(),
             position,
-            registry: crate::config::Registry { file: "codes.json".into(), path: path.into(), use_ },
+            registry: Some(crate::config::Registry { file: "codes.json".into(), path: path.into(), use_ }),
             report_unused: true,
+            ..Default::default()
         }),
         ..empty_rule()
     }
@@ -222,7 +223,7 @@ fn unused_registry_entries_are_found_across_files() {
     let ctx = Project { index: &index, aliases: &aliases, resolvers: &crate::adapters::Resolvers::default(), paths: &paths, docs: &docs };
     let unused = unused_registry_entries(&compiled, files[1..].iter(), &ctx);
     assert_eq!(unused.len(), 1);
-    assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call passes it"));
+    assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call uses it"));
 }
 
 // ---- Python

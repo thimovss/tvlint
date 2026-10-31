@@ -4,7 +4,7 @@ mod roots;
 
 use tree_sitter::Node;
 
-use super::{Adapter, ClassMembers, ImportRef, Member, last_segment, text};
+use super::{Adapter, Assignment, CallKeywords, ClassMembers, Comparison, ImportRef, Member, last_segment, text};
 use crate::check::Project;
 
 pub use roots::PythonRoots;
@@ -177,11 +177,90 @@ impl Adapter for Python {
         Some(members)
     }
 
+    fn assignment<'t>(&self, node: Node<'t>, src: &str) -> Option<Assignment<'t>> {
+        let augmented = match node.kind() {
+            "assignment" => false,
+            "augmented_assignment" => true,
+            _ => return None,
+        };
+        let value = node.child_by_field_name("right");
+        // `x: int` declares without assigning; `a, b = ...` has no single target.
+        if value.is_none() && !augmented {
+            return None;
+        }
+        let left = node.child_by_field_name("left")?;
+        if !matches!(left.kind(), "identifier" | "attribute" | "subscript") {
+            return None;
+        }
+        Some(Assignment { target: target_name(left, src), augmented, declaration: false, value })
+    }
+
+    /// `a == b`, `a < b < c`, `a not in b`: the operands are the named children, the operators their own field.
+    fn comparison<'t>(&self, node: Node<'t>, src: &str) -> Option<Comparison<'t>> {
+        if node.kind() != "comparison_operator" {
+            return None;
+        }
+        let mut cursor = node.walk();
+        let operators = node.children_by_field_name("operators", &mut cursor).map(|o| text(o, src).split_whitespace().collect::<Vec<_>>().join(" ")).collect();
+        let mut cursor = node.walk();
+        let operands = node.named_children(&mut cursor).filter(|n| n.kind() != "comment").collect();
+        Some(Comparison { operators, operands })
+    }
+
+    fn call_keywords<'t>(&self, node: Node<'t>, src: &str) -> Option<CallKeywords<'t>> {
+        if node.kind() != "call" {
+            return None;
+        }
+        let mut keywords = CallKeywords { named: Vec::new(), has_splat: false };
+        let arguments = node.child_by_field_name("arguments")?;
+        let mut cursor = arguments.walk();
+        for argument in arguments.named_children(&mut cursor) {
+            match argument.kind() {
+                "keyword_argument" => {
+                    if let (Some(name), Some(value)) = (argument.child_by_field_name("name"), argument.child_by_field_name("value")) {
+                        keywords.named.push((text(name, src).to_string(), value));
+                    }
+                }
+                "dictionary_splat" => keywords.has_splat = true,
+                _ => {}
+            }
+        }
+        Some(keywords)
+    }
+
+    /// `{"key": value}`; entries whose key is not a plain string are left out.
+    fn dict_entries<'t>(&self, node: Node<'t>, src: &str) -> Option<Vec<(String, Node<'t>)>> {
+        if node.kind() != "dictionary" {
+            return None;
+        }
+        let mut cursor = node.walk();
+        let entries = node
+            .named_children(&mut cursor)
+            .filter(|n| n.kind() == "pair")
+            .filter_map(|pair| Some((self.string_value(pair.child_by_field_name("key")?, src)?, pair.child_by_field_name("key")?)))
+            .collect();
+        Some(entries)
+    }
+
     fn function_name(&self, node: Node, src: &str) -> Option<String> {
         if node.kind() != "function_definition" {
             return None;
         }
         Some(text(node.child_by_field_name("name")?, src).to_string())
+    }
+}
+
+/// The target of an assignment as written: `a`, `a.b`, `a.b[]`; anything else is `?`.
+fn target_name(node: Node, src: &str) -> String {
+    match node.kind() {
+        "identifier" => text(node, src).to_string(),
+        "attribute" => {
+            let object = node.child_by_field_name("object").map_or_else(|| "?".to_string(), |o| target_name(o, src));
+            format!("{object}.{}", node.child_by_field_name("attribute").map_or("?", |a| text(a, src)))
+        }
+        "subscript" => format!("{}[]", node.child_by_field_name("value").map_or_else(|| "?".to_string(), |v| target_name(v, src))),
+        "call" => callee_name(node, src),
+        _ => "?".to_string(),
     }
 }
 

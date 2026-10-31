@@ -45,6 +45,30 @@ pub struct Member<'t> {
     pub node: Node<'t>,
 }
 
+/// An assignment: `target = value`, `target += value`, or a declaration with a value (`const x = 1`).
+pub struct Assignment<'t> {
+    /// The target as written, e.g. `aggregate.name`; `[]` stands for an index and `?` for anything else.
+    pub target: String,
+    /// `+=`, `-=` and the like.
+    pub augmented: bool,
+    /// A declaration (`const x = 1`) rather than a change to something that exists.
+    pub declaration: bool,
+    pub value: Option<Node<'t>>,
+}
+
+/// A comparison: its operators as written and the expressions compared.
+pub struct Comparison<'t> {
+    pub operators: Vec<String>,
+    pub operands: Vec<Node<'t>>,
+}
+
+/// The keyword arguments of a call.
+pub struct CallKeywords<'t> {
+    pub named: Vec<(String, Node<'t>)>,
+    /// The call also passes `**kwargs`, so it may pass more than it names.
+    pub has_splat: bool,
+}
+
 /// What a class body declares directly (not what it inherits): method names and fields.
 pub struct ClassMembers<'t> {
     pub methods: Vec<String>,
@@ -116,6 +140,26 @@ pub trait Adapter: Sync {
 
     /// If `node` defines a class, the methods and fields its body declares.
     fn class_members<'t>(&self, _node: Node<'t>, _src: &str) -> Option<ClassMembers<'t>> {
+        None
+    }
+
+    /// If `node` assigns something.
+    fn assignment<'t>(&self, _node: Node<'t>, _src: &str) -> Option<Assignment<'t>> {
+        None
+    }
+
+    /// If `node` compares expressions with `==`, `<`, `in` and the like.
+    fn comparison<'t>(&self, _node: Node<'t>, _src: &str) -> Option<Comparison<'t>> {
+        None
+    }
+
+    /// If `node` is a call in a language with keyword arguments, those arguments.
+    fn call_keywords<'t>(&self, _node: Node<'t>, _src: &str) -> Option<CallKeywords<'t>> {
+        None
+    }
+
+    /// If `node` is a dict or object literal, its entries with plain keys.
+    fn dict_entries<'t>(&self, _node: Node<'t>, _src: &str) -> Option<Vec<(String, Node<'t>)>> {
         None
     }
 

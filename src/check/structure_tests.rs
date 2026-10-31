@@ -6,25 +6,25 @@ use super::*;
 use crate::config::{ClassFilter, Language, Rule};
 use crate::source::{Parsers, SourceFile};
 
-fn parse(path: &str, text: &str) -> SourceFile {
+pub(super) fn parse(path: &str, text: &str) -> SourceFile {
     let (language, tree) = Parsers::new().unwrap().parse(path, text).unwrap();
     SourceFile { path: path.into(), language, text: text.into(), tree }
 }
 
-fn list(items: &[&str]) -> Vec<String> {
+pub(super) fn list(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
-fn py() -> Rule {
+pub(super) fn py() -> Rule {
     Rule { language: vec![Language::Python], ..Rule::default() }
 }
 
-fn ts() -> Rule {
+pub(super) fn ts() -> Rule {
     Rule { language: vec![Language::TypeScript], ..Rule::default() }
 }
 
 /// (line, message) of every violation of `rule` in `target`, with `others` in the project for class lookups.
-fn run(target: (&str, &str), others: &[(&str, &str)], rule: &Rule) -> Vec<(usize, String)> {
+pub(super) fn run(target: (&str, &str), others: &[(&str, &str)], rule: &Rule) -> Vec<(usize, String)> {
     let files: Vec<SourceFile> = others.iter().chain(std::iter::once(&target)).map(|(p, t)| parse(p, t)).collect();
     let index = ClassIndex::build(&files);
     let compiled = CompiledRule::new("r", rule).unwrap();
@@ -35,7 +35,7 @@ fn run(target: (&str, &str), others: &[(&str, &str)], rule: &Rule) -> Vec<(usize
     out.into_iter().map(|v| (v.line, v.message)).collect()
 }
 
-fn lines(target: (&str, &str), others: &[(&str, &str)], rule: &Rule) -> Vec<usize> {
+pub(super) fn lines(target: (&str, &str), others: &[(&str, &str)], rule: &Rule) -> Vec<usize> {
     run(target, others, rule).into_iter().map(|h| h.0).collect()
 }
 

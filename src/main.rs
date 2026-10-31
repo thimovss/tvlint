@@ -157,7 +157,7 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
     let docs: BTreeMap<String, data::Doc> =
         files.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), data::Doc::build(f))).collect();
     for (id, rule) in &config.rules {
-        let reads = rule.same_keys_as.iter().chain(rule.literal_argument.iter().map(|a| &a.registry.file));
+        let reads = rule.same_keys_as.iter().chain(rule.literal_check().and_then(|a| a.registry.as_ref()).map(|r| &r.file));
         if let Some(file) = reads.map(|f| normalize_file(f)).find(|f| !docs.contains_key(f)) {
             bail!("rule `{id}` reads {file}, which is not a JSON, YAML or TOML file in the project (paths are relative to the config; ignored files are skipped)");
         }
@@ -225,7 +225,7 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
 
     // Registry entries that nothing uses are reported in the registry file, from every file in scope.
     for (id, rule) in rules.iter().filter(|(_, r)| r.literal.as_ref().is_some_and(|l| l.report_unused)) {
-        let Some(registry) = rule.literal.as_ref().map(|l| l.file.as_str()) else { continue };
+        let Some(registry) = rule.literal.as_ref().and_then(|l| l.file.as_deref()) else { continue };
         let Some(registry_idx) = files.iter().position(|f| f.path == registry) else { continue };
         if !selected(registry) || suppressions[registry_idx].ignore_file {
             continue;

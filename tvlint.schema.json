@@ -155,9 +155,24 @@
     "literalArgument": {
       "description": "Python, JavaScript, TypeScript, Rust. String literals passed to calls must be listed in a data file.",
       "type": "object",
-      "required": ["calls", "registry"],
+      "required": ["calls"],
+      "anyOf": [{ "required": ["registry"] }, { "required": ["pattern"] }, { "required": ["require_literal"] }],
       "additionalProperties": false,
       "properties": {
+        "pattern": {
+          "description": "Glob or list of globs every literal must match, e.g. `[a-z]*_failed.[a-z]*`.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "require_literal": {
+          "description": "A watched argument that is not a plain string literal (a variable, an f-string) is reported.",
+          "type": "boolean",
+          "default": false
+        },
+        "lookup": {
+          "description": "What is looked up in the registry: the literal itself, or the part before its first dot.",
+          "enum": ["value", "prefix"],
+          "default": "value"
+        },
         "calls": {
           "description": "Calls whose argument is checked, as patterns like `forbid_call`.",
           "$ref": "#/$defs/stringOrList"
@@ -167,6 +182,103 @@
           "type": "integer",
           "minimum": 0,
           "default": 0
+        },
+        "registry": {
+          "type": "object",
+          "required": ["file", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "description": "The data file listing the allowed values, relative to the config file.",
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "path": {
+              "description": "Which nodes of the file are entries, as a key path such as `errors.*`.",
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "use": {
+              "description": "What an entry is called: its `key`, its `value`, or its full `path`.",
+              "enum": ["key", "value", "path"],
+              "default": "value"
+            }
+          }
+        },
+        "report_unused": {
+          "description": "Also report registry entries that no call in scope uses.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+
+    "argumentCheck": {
+      "description": "Calls, and the keyword arguments they must (require_argument) or must not (forbid_argument) pass.",
+      "type": "object",
+      "required": ["calls", "names"],
+      "additionalProperties": false,
+      "properties": {
+        "calls": { "description": "Call patterns, as in `forbid_call`.", "$ref": "#/$defs/stringOrList" },
+        "names": { "description": "Keyword argument names.", "$ref": "#/$defs/stringOrList" }
+      }
+    },
+    "argumentKeys": {
+      "description": "Constraints on the keys of a dict or object literal passed to a call.",
+      "type": "object",
+      "required": ["calls"],
+      "anyOf": [{ "required": ["forbid_keys"] }, { "required": ["allow_keys"] }],
+      "additionalProperties": false,
+      "properties": {
+        "calls": { "description": "Call patterns, as in `forbid_call`.", "$ref": "#/$defs/stringOrList" },
+        "position": { "description": "Which positional argument holds the dict, counting from 0.", "type": "integer", "minimum": 0, "default": 0 },
+        "keyword": { "description": "Look at the keyword argument with this name instead of a positional one.", "$ref": "#/$defs/nonEmptyString" },
+        "forbid_keys": { "description": "Key globs that may not appear, e.g. `*_id`.", "$ref": "#/$defs/stringOrList" },
+        "allow_keys": { "description": "Every key must match one of these globs.", "$ref": "#/$defs/stringOrList" }
+      }
+    },
+    "forbidLiteral": {
+      "description": "String literals that may not be compared or assigned.",
+      "type": "object",
+      "anyOf": [{ "required": ["compared"] }, { "required": ["assigned_to"] }],
+      "additionalProperties": false,
+      "properties": {
+        "compared": { "description": "A string literal on either side of ==, !=, === or !==.", "type": "boolean" },
+        "assigned_to": { "description": "A string literal assigned to a name matching one of these globs, e.g. `[A-Z]*` for constants.", "$ref": "#/$defs/stringOrList" }
+      }
+    },
+    "allowRaise": {
+      "description": "Only these exceptions may be raised. A lowercase name is a variable and is left alone.",
+      "type": "object",
+      "anyOf": [{ "required": ["names"] }, { "required": ["subclass_of"] }],
+      "additionalProperties": false,
+      "properties": {
+        "names": { "description": "Exception name globs, matched on the full dotted name or its last part.", "$ref": "#/$defs/stringOrList" },
+        "subclass_of": { "description": "A class name: it and everything that inherits from it.", "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "literalAssignment": {
+      "description": "Python, JavaScript, TypeScript. String literals assigned to names must be listed in a data file and/or have a shape.",
+      "type": "object",
+      "required": ["names"],
+      "anyOf": [{ "required": ["registry"] }, { "required": ["pattern"] }, { "required": ["require_literal"] }],
+      "additionalProperties": false,
+      "properties": {
+        "pattern": {
+          "description": "Glob or list of globs every literal must match, e.g. `[a-z]*_failed.[a-z]*`.",
+          "$ref": "#/$defs/stringOrList"
+        },
+        "require_literal": {
+          "description": "A watched argument that is not a plain string literal (a variable, an f-string) is reported.",
+          "type": "boolean",
+          "default": false
+        },
+        "lookup": {
+          "description": "What is looked up in the registry: the literal itself, or the part before its first dot.",
+          "enum": ["value", "prefix"],
+          "default": "value"
+        },
+        "names": {
+          "description": "Assignment targets whose value is checked, as globs on the target as written, e.g. `event_type` or `self.*`.",
+          "$ref": "#/$defs/stringOrList"
         },
         "registry": {
           "type": "object",
@@ -261,6 +373,23 @@
           "type": "integer",
           "minimum": 1
         },
+        "forbid_assignment": {
+          "description": "Python, JavaScript, TypeScript. Target globs, as written (`aggregate.*`, `self.items[]`), that may not be assigned. `+=` counts.",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_augmented_assignment": {
+          "description": "Python, JavaScript, TypeScript. Target globs that may not be changed with `+=`, `-=` and the like.",
+          "$ref": "#/$defs/stringList"
+        },
+        "forbid_literal": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/forbidLiteral" },
+        "require_argument": {
+          "description": "Python. Matching calls must pass these keyword arguments. Calls with `**kwargs` are skipped.",
+          "$ref": "#/$defs/argumentCheck"
+        },
+        "forbid_argument": { "description": "Python. Matching calls must not pass these keyword arguments.", "$ref": "#/$defs/argumentCheck" },
+        "argument_keys": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/argumentKeys" },
+        "allow_raise": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/allowRaise" },
+        "literal_assignment": { "$ref": "#/$defs/literalAssignment" },
         "require_call": {
           "description": "Python, JavaScript, TypeScript, Rust, Go, shell. Call patterns, as in `forbid_call`: one of them must appear in every file in scope, or in every function that `within_function` selects.",
           "$ref": "#/$defs/stringList"
@@ -319,6 +448,14 @@
         { "required": ["require_method"] },
         { "required": ["require_field"] },
         { "required": ["forbid_field"] },
+        { "required": ["forbid_assignment"] },
+        { "required": ["forbid_augmented_assignment"] },
+        { "required": ["forbid_literal"] },
+        { "required": ["require_argument"] },
+        { "required": ["forbid_argument"] },
+        { "required": ["argument_keys"] },
+        { "required": ["allow_raise"] },
+        { "required": ["literal_assignment"] },
         { "required": ["require_filename"] }
       ],
 
@@ -327,7 +464,20 @@
         "same_placeholders": ["same_keys_as"],
         "except_function": ["within_function"],
         "in_class": { "anyOf": [{ "required": ["require_method"] }, { "required": ["require_field"] }, { "required": ["forbid_field"] }] },
-        "within_function": { "anyOf": [{ "required": ["forbid_call"] }, { "required": ["forbid_raise"] }, { "required": ["require_call"] }] },
+        "within_function": {
+          "anyOf": [
+            { "required": ["forbid_call"] },
+            { "required": ["forbid_raise"] },
+            { "required": ["require_call"] },
+            { "required": ["forbid_assignment"] },
+            { "required": ["forbid_augmented_assignment"] },
+            { "required": ["forbid_literal"] },
+            { "required": ["require_argument"] },
+            { "required": ["forbid_argument"] },
+            { "required": ["argument_keys"] },
+            { "required": ["allow_raise"] }
+          ]
+        },
         "within_property": {
           "anyOf": [
             { "required": ["forbid_call"] },
@@ -356,7 +506,15 @@
               { "required": ["same_placeholders"] },
               { "required": ["literal_argument"] },
               { "required": ["max_lines"] },
-              { "required": ["require_call"] },
+              { "required": ["forbid_assignment"] },
+              { "required": ["forbid_augmented_assignment"] },
+              { "required": ["forbid_literal"] },
+              { "required": ["require_argument"] },
+              { "required": ["forbid_argument"] },
+              { "required": ["argument_keys"] },
+              { "required": ["allow_raise"] },
+              { "required": ["literal_assignment"] },
+                    { "required": ["require_call"] },
               { "required": ["require_method"] },
               { "required": ["require_field"] },
               { "required": ["forbid_field"] },
@@ -380,6 +538,14 @@
         { "if": { "required": ["same_keys_as"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
         { "if": { "required": ["same_placeholders"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyData" } } } },
         { "if": { "required": ["literal_argument"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
+        { "if": { "required": ["forbid_assignment"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["forbid_augmented_assignment"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["forbid_literal"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["require_argument"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyPython" } } } },
+        { "if": { "required": ["forbid_argument"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyPython" } } } },
+        { "if": { "required": ["argument_keys"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["allow_raise"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["literal_assignment"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         { "if": { "required": ["require_call"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
         { "if": { "required": ["require_method"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         { "if": { "required": ["require_field"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },

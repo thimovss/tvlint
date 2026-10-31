@@ -9,7 +9,7 @@ use crate::adapters::{self, Adapter, last_segment};
 use crate::config::fill_placeholders;
 use crate::source::SourceFile;
 use super::compile::{compile_paths, relative_to};
-use super::structure;
+use super::{shape, structure};
 use super::data_checks::check_data;
 use super::{CompiledLiteral, CompiledRule, Literal, Project, Violation};
 
@@ -61,6 +61,10 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
     });
     let (import_set, except_set) = filled.as_ref().map_or((&rule.import, &rule.except_import), |(forbid, except)| (forbid, except));
     let class_scope = structure::class_scope(rule, adapter, ctx);
+    let raise_classes = rule
+        .allow_raise
+        .as_ref()
+        .and_then(|allow| Some(ctx.index.subclasses_of(adapter.class_family()?, allow.subclass_of?)));
     let file_wide_call = !rule.require_call.is_empty() && rule.within_function.is_empty();
     let mut called = false;
     let mut report = |node: Node, message: String| {
@@ -77,6 +81,7 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
     visit(file.tree.root_node(), &mut |node| {
         structure::check_class(rule, adapter, node, src, class_scope.as_ref(), &mut report);
         structure::check_function(rule, adapter, node, src, &mut report);
+        shape::check(rule, adapter, node, src, raise_classes.as_ref(), &mut report);
         if file_wide_call && !called {
             called = adapter.call_name(node, src).is_some_and(|callee| rule.require_call.is_match(&callee));
         }
@@ -169,34 +174,44 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
     }
     if let Some(literal) = &rule.literal {
         let entries = literal.entries(ctx);
-        for found in literal_arguments(file, literal) {
-            if !entries.contains_key(&found.value) {
-                out.push(Violation {
-                    path: file.path.clone(),
-                    line: found.at.0,
-                    column: found.at.1,
-                    rule_id: rule.id.to_string(),
-                    message: format!("`{}` passed to `{}` is not listed in {}", found.value, found.callee, literal.file),
-                });
+        let verb = if literal.assignment { "assigned to" } else { "passed to" };
+        for found in literal_values(file, literal) {
+            let message = match &found.value {
+                None if literal.require_literal => Some(format!("the value {verb} `{}` must be a plain string literal, not an expression", found.watched)),
+                None => None,
+                Some(value) if !literal.pattern.is_empty() && !literal.pattern.is_match(value) => {
+                    Some(format!("`{value}` {verb} `{}` does not match {}", found.watched, literal.pattern_text.join(" or ")))
+                }
+                Some(value) => literal.file.as_ref().and_then(|registry| {
+                    let key = literal.lookup.key(value);
+                    let what = if key == value { format!("`{value}`") } else { format!("the prefix `{key}` of `{value}`") };
+                    (!entries.contains_key(key)).then(|| format!("{what} {verb} `{}` is not listed in {registry}", found.watched))
+                }),
+            };
+            if let Some(message) = message {
+                out.push(Violation { path: file.path.clone(), line: found.at.0, column: found.at.1, rule_id: rule.id.to_string(), message });
             }
         }
     }
 }
 
-/// The string literals passed as the watched argument of the watched calls.
-pub fn literal_arguments(file: &SourceFile, literal: &CompiledLiteral) -> Vec<Literal> {
+/// The values of the watched arguments of the watched calls, or of the watched assignments.
+pub fn literal_values(file: &SourceFile, literal: &CompiledLiteral) -> Vec<Literal> {
     let adapter = adapters::for_language(file.language);
     let src = file.text.as_str();
     let mut found = Vec::new();
     visit(file.tree.root_node(), &mut |node| {
-        let Some(callee) = adapter.call_name(node, src) else { return };
-        if !literal.calls.is_match(&callee) {
-            return;
-        }
-        let Some(argument) = adapter.call_arguments(node).and_then(|args| args.get(literal.position).copied()) else { return };
-        let Some(value) = adapter.string_value(argument, src) else { return };
-        let at = argument.start_position();
-        found.push(Literal { value, at: (at.row + 1, at.column + 1), callee });
+        let (watched, value) = if literal.assignment {
+            let Some(assignment) = adapter.assignment(node, src).filter(|a| !a.augmented && literal.watched.is_match(&a.target)) else { return };
+            let Some(value) = assignment.value else { return };
+            (assignment.target, value)
+        } else {
+            let Some(callee) = adapter.call_name(node, src).filter(|callee| literal.watched.is_match(callee)) else { return };
+            let Some(argument) = adapter.call_arguments(node).and_then(|args| args.get(literal.position).copied()) else { return };
+            (callee, argument)
+        };
+        let at = value.start_position();
+        found.push(Literal { value: adapter.string_value(value, src), at: (at.row + 1, at.column + 1), watched });
     });
     found
 }
@@ -208,17 +223,19 @@ pub fn unused_registry_entries<'f>(
     ctx: &Project,
 ) -> Vec<Violation> {
     let Some(literal) = rule.literal.as_ref().filter(|l| l.report_unused) else { return Vec::new() };
-    let used: HashSet<String> = files.flat_map(|f| literal_arguments(f, literal)).map(|l| l.value).collect();
+    let Some(registry) = literal.file.clone() else { return Vec::new() };
+    let by = if literal.assignment { "assignment" } else { "call" };
+    let used: HashSet<String> = files.flat_map(|f| literal_values(f, literal)).filter_map(|l| l.value).map(|v| literal.lookup.key(&v).to_string()).collect();
     literal
         .entries(ctx)
         .iter()
         .filter(|(name, _)| !used.contains(*name))
         .map(|(name, at)| Violation {
-            path: literal.file.clone(),
+            path: registry.clone(),
             line: at.0,
             column: at.1,
             rule_id: rule.id.to_string(),
-            message: format!("`{name}` is listed here but no watched call passes it"),
+            message: format!("`{name}` is listed here but no watched {by} uses it"),
         })
         .collect()
 }

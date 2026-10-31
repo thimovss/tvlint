@@ -48,21 +48,24 @@ pub(super) fn check_against_project(
                 Some(format!("the path is relative to {}; files ignored by .gitignore are skipped", root.display())),
             );
         }
-        if let Some(arg) = &rule.literal_argument {
-            let at = format!("rules.{id}.literal_argument.registry");
-            match docs.get(&normalize_file(&arg.registry.file)) {
+        if let Some(arg) = rule.literal_check()
+            && let Some(registry) = &arg.registry
+        {
+            let key = if rule.literal_assignment.is_some() { "literal_assignment" } else { "literal_argument" };
+            let at = format!("rules.{id}.{key}.registry");
+            match docs.get(&normalize_file(&registry.file)) {
                 None => report.error(
                     &format!("{at}.file"),
-                    format!("`{}` is not a JSON, YAML or TOML file in the project", arg.registry.file),
+                    format!("`{}` is not a JSON, YAML or TOML file in the project", registry.file),
                     Some(format!("the path is relative to {}; files ignored by .gitignore are skipped", root.display())),
                 ),
                 Some(doc) => {
-                    if let Ok(pattern) = PathPattern::parse(&arg.registry.path)
-                        && doc.registry(&pattern, arg.registry.use_).is_empty()
+                    if let Ok(pattern) = PathPattern::parse(&registry.path)
+                        && doc.registry(&pattern, registry.use_).is_empty()
                     {
                         report.warning(
                             &format!("{at}.path"),
-                            format!("`{}` selects no entries in {}, so every literal would be reported", arg.registry.path, arg.registry.file),
+                            format!("`{}` selects no entries in {}, so every literal would be reported", registry.path, registry.file),
                             Some("`use: value` and `use: path` only count scalars; check the path against the file's structure".into()),
                         );
                     }

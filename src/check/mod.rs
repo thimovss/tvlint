@@ -4,6 +4,7 @@ mod classes;
 mod code;
 mod compile;
 mod data_checks;
+mod shape;
 mod structure;
 
 pub use classes::ClassIndex;
@@ -63,3 +64,5 @@ pub fn check_filename(path: &str, rule: &CompiledRule) -> Option<Violation> {
 mod tests;
 #[cfg(test)]
 mod structure_tests;
+#[cfg(test)]
+mod shape_tests;
