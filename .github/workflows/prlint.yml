@@ -1,0 +1,48 @@
+# Runs prlint's own rules (prlint.yaml) against this repository.
+name: prlint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  prlint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # to upload the SARIF report
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build prlint
+        run: cargo build --release --locked
+
+      - name: Validate prlint.yaml
+        run: ./target/release/prlint validate
+
+      # Exit code 1 only means "violations found", which the next step reports; 2 is a real failure.
+      - name: Write SARIF report
+        run: |
+          code=0
+          ./target/release/prlint check --format sarif > prlint.sarif || code=$?
+          [ "$code" -le 1 ] || exit "$code"
+
+      # Needs code scanning, which is free for public repositories. It must not fail the build elsewhere.
+      - name: Upload SARIF to code scanning
+        if: always() && hashFiles('prlint.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: prlint.sarif
+          category: prlint
+
+      - name: Check the codebase
+        run: ./target/release/prlint check
