@@ -82,7 +82,7 @@ Ours: simple declarative rules, deterministic results, and agent-readable feedba
 
 ## Risks
 
-- **False-positive fatigue** kills linters. Mitigate with precise rule semantics, easy but audited suppression, and a dry-run mode for new rules.
+- **False-positive fatigue** kills linters. Mitigate with precise rule semantics, and easy but audited suppression.
 - **Rule authoring friction.** Mitigate with good defaults, templates, and rule mining.
 - **Overlap with Semgrep.** Mitigate by staying focused on business rules and agent feedback, not breadth of pattern matching.
 - **Parser maintenance across languages.** Mitigate by starting with JS/TS and Python, relying on tree-sitter's ecosystem, and keeping language-specific logic isolated in adapters so new languages are cheap to add.

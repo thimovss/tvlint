@@ -27,7 +27,6 @@ CLAUDE.md still describes a product that does not exist yet. Not built:
 
 - `lint check` / `lint init`, and `.lint/rules/`
 - JSON and SARIF output
-- a dry-run mode for new rules
 - a mandatory reason on suppressions (optional today)
 
 Decision needed: update the brief to match what exists (`prlint`, `prlint.yaml`), or move these to a roadmap.
