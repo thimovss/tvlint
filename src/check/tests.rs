@@ -1,7 +1,10 @@
+use std::collections::{BTreeMap, HashSet};
+
+use super::compile::relative_to;
 use super::*;
-use crate::config::{ClassSelector, Language};
+use crate::config::{ClassSelector, Language, Rule, Use};
 use crate::data::Doc;
-use crate::source::Parsers;
+use crate::source::{Parsers, SourceFile};
 
 fn parse(path: &str, text: &str) -> SourceFile {
     let (language, tree) = Parsers::new().unwrap().parse(path, text).unwrap();

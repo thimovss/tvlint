@@ -59,7 +59,7 @@ rules:
     forbid_import: ["serde_yaml_ng", "serde_yaml_ng::**"]
     forbid_call: ["serde_yaml_ng::*"]
     rationale: >
-      config.rs loads the config with a strict schema, and validate.rs reads the raw YAML to report every problem.
+      config.rs loads the config with a strict schema, and src/validate/ reads the raw YAML to report every problem.
       Other code reading YAML would skip both.
     fix: Go through Config, from src/config.rs.
 
@@ -165,18 +165,18 @@ scopes:
     exclude: ["src/source.rs"]
 
   # Excluded: data.rs is the adapter for JSON, YAML and TOML, suppress.rs asks only whether a node is a
-  # comment, which every grammar names `comment` or `*_comment`, and validate.rs calls .kind() on glob
+  # comment, which every grammar names `comment` or `*_comment`, and src/validate/ calls .kind() on glob
   # errors, not syntax nodes.
   - rules: [node-kinds-only-in-adapters]
     include: ["src/**"]
-    exclude: ["src/adapters/**", "src/data.rs", "src/suppress.rs", "src/validate.rs"]
+    exclude: ["src/adapters/**", "src/data.rs", "src/suppress.rs", "src/validate/**"]
 
   - rules: [one-parser-technology, maintained-yaml-crate, deterministic-collections, no-huge-files]
     include: ["src/**"]
 
   - rules: [yaml-only-in-config-and-validate]
     include: ["src/**"]
-    exclude: ["src/config.rs", "src/validate.rs", "src/validate/**"]
+    exclude: ["src/config.rs", "src/validate/**"]
 
   - rules: [foundation-modules-import-nothing]
     include: ["src/config.rs", "src/select.rs"]
@@ -191,7 +191,7 @@ scopes:
     include: ["src/adapters/**"]
 
   - rules: [engine-depends-on-adapters-and-source]
-    include: ["src/check.rs"]
+    include: ["src/check/**"]
 
   - rules: [suppression-depends-on-engine-and-source]
     include: ["src/suppress.rs"]

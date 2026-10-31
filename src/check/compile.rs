@@ -1,0 +1,206 @@
+//! Rules with their patterns compiled, ready to run against files.
+
+use std::collections::{BTreeMap, HashSet};
+use std::sync::OnceLock;
+
+use anyhow::{Context, Result};
+use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
+
+use crate::config::{Rule, Use};
+use crate::data::{PathPattern, Position};
+use super::Project;
+
+/// A rule with its patterns compiled, ready to run against files.
+pub struct CompiledRule<'a> {
+    pub id: &'a str,
+    pub rule: &'a Rule,
+    /// The directory of the config that defines the rule, from the project root. Import patterns are relative to it.
+    pub(super) base: String,
+    pub(super) raise: GlobSet,
+    pub(super) call: GlobSet,
+    pub(super) catch_root: Option<&'a str>,
+    pub(super) filename: GlobSet,
+    pub(super) import: GlobSet,
+    pub(super) except_import: GlobSet,
+    pub(super) element: GlobSet,
+    pub(super) property: HashSet<&'a str>,
+    pub(super) within: HashSet<&'a str>,
+    pub(super) property_value: Option<CompiledPropertyValue<'a>>,
+    // Data files (JSON, YAML, TOML).
+    pub(super) data_property: Vec<PathPattern>,
+    pub(super) data_value: Option<CompiledDataValue>,
+    pub(super) require_property: Vec<RequiredProperty>,
+    pub(super) reference: Option<String>,
+    pub literal: Option<CompiledLiteral>,
+}
+
+pub(super) struct CompiledDataValue {
+    pub(super) names: Vec<PathPattern>,
+    pub(super) forbid: GlobSet,
+    pub(super) require: GlobSet,
+}
+
+pub(super) struct RequiredProperty {
+    pub(super) parent: PathPattern,
+    pub(super) key: String,
+    pub(super) text: String,
+}
+
+pub struct CompiledLiteral {
+    pub(super) calls: GlobSet,
+    pub(super) position: usize,
+    pub file: String,
+    pub(super) registry_path: PathPattern,
+    pub(super) use_: Use,
+    pub report_unused: bool,
+    pub(super) entries: OnceLock<BTreeMap<String, Position>>,
+}
+
+impl CompiledLiteral {
+    /// The allowed values, by where they are defined in the registry file.
+    pub fn entries(&self, ctx: &Project) -> &BTreeMap<String, Position> {
+        self.entries.get_or_init(|| ctx.docs.get(&self.file).map(|doc| doc.registry(&self.registry_path, self.use_)).unwrap_or_default())
+    }
+}
+
+/// A string literal passed as an argument that a `literal_argument` rule watches.
+pub struct Literal {
+    pub value: String,
+    pub at: Position,
+    pub callee: String,
+}
+
+pub(super) struct CompiledPropertyValue<'a> {
+    pub(super) names: HashSet<&'a str>,
+    pub(super) in_call: GlobSet,
+    pub(super) forbid_literal: bool,
+    pub(super) starts_with: Option<GlobMatcher>,
+}
+
+/// `./a/b.json` and `a/b.json` name the same file.
+pub fn normalize_file(path: &str) -> String {
+    path.trim_start_matches("./").to_string()
+}
+
+pub(super) fn compile_value_globs(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
+    }
+    Ok(builder.build()?)
+}
+
+impl<'a> CompiledRule<'a> {
+    pub fn new(id: &'a str, rule: &'a Rule) -> Result<Self> {
+        let data = rule.language.iter().any(|l| l.is_data());
+        let paths = |patterns: &[String], key: &str| -> Result<Vec<PathPattern>> {
+            patterns
+                .iter()
+                .map(|p| PathPattern::parse(p))
+                .collect::<Result<_>>()
+                .with_context(|| format!("rule `{id}` {key}"))
+        };
+        Ok(CompiledRule {
+            data_property: if data { paths(&rule.forbid_property, "forbid_property")? } else { Vec::new() },
+            data_value: match (&rule.property_value, data) {
+                (Some(pv), true) => Some(CompiledDataValue {
+                    names: paths(&pv.names, "property_value names")?,
+                    forbid: compile_value_globs(&pv.forbid_value).with_context(|| format!("rule `{id}` forbid_value"))?,
+                    require: compile_value_globs(&pv.require_value).with_context(|| format!("rule `{id}` require_value"))?,
+                }),
+                _ => None,
+            },
+            require_property: rule
+                .require_property
+                .iter()
+                .map(|text| {
+                    let pattern = PathPattern::parse(text).with_context(|| format!("rule `{id}` require_property"))?;
+                    let (parent, key) = pattern.split_last().with_context(|| {
+                        format!("rule `{id}` require_property `{text}`: the last segment must be a key name, not a wildcard")
+                    })?;
+                    Ok(RequiredProperty { parent, key, text: text.clone() })
+                })
+                .collect::<Result<_>>()?,
+            reference: rule.same_keys_as.as_deref().map(normalize_file),
+            literal: rule
+                .literal_argument
+                .as_ref()
+                .map(|arg| -> Result<CompiledLiteral> {
+                    Ok(CompiledLiteral {
+                        calls: compile(&arg.calls)?,
+                        position: arg.position,
+                        file: normalize_file(&arg.registry.file),
+                        registry_path: PathPattern::parse(&arg.registry.path)?,
+                        use_: arg.registry.use_,
+                        report_unused: arg.report_unused,
+                        entries: OnceLock::new(),
+                    })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` literal_argument"))?,
+            id,
+            rule,
+            base: String::new(),
+            raise: compile(&rule.forbid_raise).with_context(|| format!("rule `{id}` forbid_raise"))?,
+            call: compile(&rule.forbid_call).with_context(|| format!("rule `{id}` forbid_call"))?,
+            catch_root: rule.forbid_catch.as_ref().map(|c| c.subclass_of.as_str()),
+            filename: compile(&rule.require_filename).with_context(|| format!("rule `{id}` require_filename"))?,
+            import: compile_paths(&rule.forbid_import).with_context(|| format!("rule `{id}` forbid_import"))?,
+            except_import: compile_paths(&rule.except_import).with_context(|| format!("rule `{id}` except_import"))?,
+            element: compile(&rule.forbid_element).with_context(|| format!("rule `{id}` forbid_element"))?,
+            property: rule.forbid_property.iter().map(String::as_str).collect(),
+            within: rule.within_property.iter().map(String::as_str).collect(),
+            property_value: rule
+                .property_value
+                .as_ref()
+                .map(|pv| -> Result<CompiledPropertyValue> {
+                    Ok(CompiledPropertyValue {
+                        names: pv.names.iter().map(String::as_str).collect(),
+                        in_call: compile(&pv.in_call)?,
+                        forbid_literal: pv.forbid_literal,
+                        starts_with: pv.array_starts_with.as_deref().map(|p| Glob::new(p).map(|g| g.compile_matcher())).transpose()?,
+                    })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` property_value"))?,
+        })
+    }
+}
+
+impl CompiledRule<'_> {
+    /// Makes import patterns relative to `base`, the directory of the config the rule was written in.
+    pub fn in_dir(mut self, base: &str) -> Self {
+        self.base = base.to_string();
+        self
+    }
+}
+
+/// `path` relative to the directory `base` (both from the project root); `../` leads out of `base`.
+pub(super) fn relative_to(base: &str, path: &str) -> String {
+    if base.is_empty() {
+        return path.to_string();
+    }
+    let base: Vec<&str> = base.split('/').collect();
+    let parts: Vec<&str> = path.split('/').collect();
+    let common = base.iter().zip(&parts).take_while(|(a, b)| a == b).count();
+    let mut out = vec![".."; base.len() - common];
+    out.extend(&parts[common..]);
+    out.join("/")
+}
+
+pub(super) fn compile(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
+    }
+    Ok(builder.build()?)
+}
+
+/// Path-style globs: `*` stays within one segment and `**` crosses segments, as in scopes.
+pub(super) fn compile_paths(patterns: &[String]) -> Result<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(GlobBuilder::new(&pattern.replace("::", "/")).literal_separator(true).build()?);
+    }
+    Ok(builder.build()?)
+}
