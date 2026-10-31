@@ -17,6 +17,8 @@ pub struct Project<'a> {
     pub index: &'a ClassIndex,
     /// Import prefix -> project path, e.g. `@/` -> `src/`.
     pub aliases: &'a BTreeMap<String, String>,
+    /// Aliases from `tsconfig.json` and `jsconfig.json`; the `aliases` of the rule's config win over them.
+    pub tsconfigs: &'a crate::tsconfig::TsConfigs,
     /// Every file in the project, to find which file an import points at.
     pub paths: &'a HashSet<String>,
     /// Every JSON, YAML and TOML file, parsed.
@@ -644,7 +646,7 @@ mod tests {
         let index = ClassIndex::build(std::slice::from_ref(&file));
         let compiled = CompiledRule::new("r", rule).unwrap();
         let docs = BTreeMap::new();
-        let ctx = Project { index: &index, aliases, paths, docs: &docs };
+        let ctx = Project { index: &index, aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths, docs: &docs };
         let mut out = Vec::new();
         check_file(&file, &compiled, &ctx, &mut out);
         out.into_iter().map(|v| (v.line, v.message)).collect()
@@ -657,7 +659,7 @@ mod tests {
         let docs: BTreeMap<String, Doc> = parsed.iter().filter(|f| f.language.is_data()).map(|f| (f.path.clone(), Doc::build(f))).collect();
         let compiled = CompiledRule::new("r", rule).unwrap();
         let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-        let ctx = Project { index: &index, aliases: &aliases, paths: &paths, docs: &docs };
+        let ctx = Project { index: &index, aliases: &aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths: &paths, docs: &docs };
         let mut out = Vec::new();
         check_file(parsed.iter().find(|f| f.path == target).unwrap(), &compiled, &ctx, &mut out);
         out.into_iter().map(|v| (v.line, v.column, v.message)).collect()
@@ -818,7 +820,7 @@ mod tests {
         let compiled = CompiledRule::new("r", &r).unwrap();
         let index = ClassIndex::default();
         let (aliases, paths) = (BTreeMap::new(), HashSet::new());
-        let ctx = Project { index: &index, aliases: &aliases, paths: &paths, docs: &docs };
+        let ctx = Project { index: &index, aliases: &aliases, tsconfigs: &crate::tsconfig::TsConfigs::default(), paths: &paths, docs: &docs };
         let unused = unused_registry_entries(&compiled, files[1..].iter(), &ctx);
         assert_eq!(unused.len(), 1);
         assert_eq!((unused[0].path.as_str(), unused[0].line, unused[0].message.as_str()), ("codes.json", 4, "`b` is listed here but no watched call passes it"));

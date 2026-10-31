@@ -153,6 +153,17 @@ GitHub draws a pass/fail badge for any workflow, so there is nothing to host. Pu
 
 It shows the state of the latest run on the default branch. Add `?branch=main` to the image URL to pin a branch, or `?event=push` to ignore pull request runs.
 
+### Import aliases
+
+For JavaScript and TypeScript, `forbid_import` matches an aliased import by the project path it leads to. TVLint reads the aliases from the files your compiler already uses, without running `tsc` or Node:
+
+- The nearest `tsconfig.json` (or `jsconfig.json`) above the importing file decides, as in TypeScript. If both are in one directory, `tsconfig.json` is used.
+- `compilerOptions.paths` and `baseUrl` are read, with `extends` followed (relative files, and packages in `node_modules`). A child's `paths` replaces its parent's. A pattern with several targets uses the first one that exists.
+- A config whose `paths` live in a referenced file (`"references": [{ "path": "./tsconfig.app.json" }]`, as in Vite projects) also gets the referenced file's aliases.
+- Comments and trailing commas are fine.
+- A config that cannot be read, an `extends` that does not exist or loops, or invalid JSON stops `tvl check` with exit code 2 and names the file. This is only checked when a rule has `forbid_import` for JavaScript or TypeScript.
+- Aliases written in `tvlint.yaml` (`aliases`) win over the tsconfig ones. Bundler-only aliases (Vite, webpack, Jest) live in JavaScript and cannot be read, so list them there.
+
 ## Suppressing violations
 
 Two comments switch checks off. They work the same in Python, JavaScript and TypeScript, and are read from real comments, so the same words inside a string do nothing.
@@ -311,7 +322,7 @@ A rule needs at least one of `forbid_raise`, `forbid_call`, `forbid_catch` or `r
 |---|---|
 | `rules` | Required. The rules, by id. An id is lowercase words joined by dashes, like `no-direct-db-access`: no slashes, capitals, digits or underscores. |
 | `scopes` | Required. Which files each rule runs on. |
-| `aliases` | Optional. Import prefixes that stand for a project path, such as the `paths` entry of a `tsconfig.json`: `"@/": "src/"` turns `@/api` into `src/api`. Needed for `forbid_import` rules to see where an aliased import leads. The prefix and the path must both end with `/`, or neither. |
+| `aliases` | Optional. Import prefixes that stand for a project path: `"@/": "src/"` turns `@/api` into `src/api`. You rarely need it: `forbid_import` rules read `paths`, `baseUrl`, `extends` and `references` from the nearest `tsconfig.json` or `jsconfig.json` (see [Import aliases](#import-aliases)). `aliases` is for what those files cannot say, such as a bundler-only alias, and wins over them. The prefix and the path must both end with `/`, or neither. |
 
 ### Scope keys
 

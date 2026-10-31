@@ -8,6 +8,7 @@ mod scope;
 mod select;
 mod source;
 mod suppress;
+mod tsconfig;
 mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -162,7 +163,12 @@ fn check(config_path: &Path, paths: &[String], staged: bool, format: Format) -> 
             bail!("rule `{id}` reads {file}, which is not a JSON, YAML or TOML file in the project (paths are relative to the config; ignored files are skipped)");
         }
     }
-    let ctx = Project { index: &index, aliases: &config.aliases, paths: &known_paths, docs: &docs };
+    // tsconfig/jsconfig are only read when a rule needs to see where JS/TS imports lead.
+    let needs_aliases = config.rules.values().any(|r| {
+        !r.forbid_import.is_empty() && (r.applies_to(config::Language::JavaScript) || r.applies_to(config::Language::TypeScript))
+    });
+    let tsconfigs = if needs_aliases { tsconfig::TsConfigs::load(&root, &all_paths)? } else { tsconfig::TsConfigs::default() };
+    let ctx = Project { index: &index, aliases: &config.aliases, tsconfigs: &tsconfigs, paths: &known_paths, docs: &docs };
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {

@@ -490,32 +490,36 @@ const EXTENSIONS: &[&str] = &[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mt
 /// `./x` and `../x` are resolved against the importing file, aliases are expanded, and a path
 /// without extension is matched to the file that exists (`x.ts`, `x/index.tsx`, ...).
 fn es_resolve(specifier: &str, file_path: &str, project: &Project) -> String {
-    let local = if specifier.starts_with("./") || specifier.starts_with("../") {
+    // Several candidates when a tsconfig alias lists fallbacks; the first one that exists wins.
+    let candidates: Vec<String> = if specifier.starts_with("./") || specifier.starts_with("../") {
         match relative_path(specifier, file_path) {
-            Some(path) => Some(path),
+            Some(path) => vec![path],
             None => return specifier.to_string(), // leaves the project
         }
+    } else if let Some((prefix, target)) = project
+        .aliases
+        .iter()
+        .filter(|(prefix, _)| specifier.starts_with(prefix.as_str()))
+        .max_by_key(|(prefix, _)| prefix.len())
+    {
+        // The aliases written in tvlint.yaml win over the ones read from tsconfig.
+        vec![format!("{target}{}", &specifier[prefix.len()..])]
+    } else if let Some(candidates) = project.tsconfigs.resolve(specifier, file_path) {
+        candidates
     } else {
-        project
-            .aliases
-            .iter()
-            .filter(|(prefix, _)| specifier.starts_with(prefix.as_str()))
-            .max_by_key(|(prefix, _)| prefix.len())
-            .map(|(prefix, target)| format!("{target}{}", &specifier[prefix.len()..]))
+        return specifier.to_string();
     };
-    let Some(path) = local else { return specifier.to_string() };
-    let path = path.trim_end_matches('/').to_string();
-    if project.paths.contains(&path) {
-        return path;
-    }
-    for ext in EXTENSIONS {
-        for candidate in [format!("{path}{ext}"), format!("{path}/index{ext}")] {
-            if project.paths.contains(&candidate) {
-                return candidate;
-            }
+    let existing = |path: &str| -> Option<String> {
+        if project.paths.contains(path) {
+            return Some(path.to_string());
         }
-    }
-    path
+        EXTENSIONS
+            .iter()
+            .flat_map(|ext| [format!("{path}{ext}"), format!("{path}/index{ext}")])
+            .find(|candidate| project.paths.contains(candidate))
+    };
+    let candidates: Vec<String> = candidates.into_iter().map(|c| c.trim_end_matches('/').to_string()).collect();
+    candidates.iter().find_map(|c| existing(c)).unwrap_or_else(|| candidates[0].clone())
 }
 
 // ---------------------------------------------------------------------------------------------
