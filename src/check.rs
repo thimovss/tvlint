@@ -74,6 +74,10 @@ impl ClassIndex {
         index
     }
 
+    pub fn defines(&self, class: &str) -> bool {
+        self.bases.contains_key(class)
+    }
+
     /// `root` and every class that transitively inherits from it.
     pub fn subclasses_of(&self, root: &str) -> BTreeSet<String> {
         let mut found = BTreeSet::from([root.to_string()]);

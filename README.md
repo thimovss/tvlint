@@ -29,6 +29,7 @@ prlint [OPTIONS] [COMMAND]
 | `check` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
+| `validate` | Checks the config file and explains every problem it finds, with the path to the key and how to fix it. Also tells you how many files each rule will run on. Use it after writing or changing a rule. |
 | `help [command]` | Prints help for prlint or for one command. |
 
 ### Flags
@@ -40,12 +41,20 @@ prlint [OPTIONS] [COMMAND]
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |
 
+### Validating rules
+
+`prlint validate` is meant for people and AI agents that add rules. It reports all problems in one pass, not just the first.
+
+- **Errors** make the config invalid (exit `1`): unknown or misspelled keys (with a "did you mean" suggestion), missing `language`, `rationale` or `fix`, wrong types, a rule with no checks, invalid globs, scopes that name a rule that doesn't exist, bad YAML syntax.
+- **Warnings** don't fail validation (exit `0`) but usually mean a mistake: a rule no scope uses, a scope that matches no files for the rule's language, a `subclass_of` class that isn't defined in the project. They are only reported once there are no errors.
+- When valid, it lists each rule with what it forbids and how many files it runs on. A rule that runs on `0 file(s)` is almost always a wrong glob.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | No violations. |
-| `1` | At least one violation was found. |
+| `1` | At least one violation was found (`check`), or the config is invalid (`validate`). |
 | `2` | prlint could not run: missing or invalid config, unknown rule, bad glob. The message goes to stderr. |
 
 Violations go to stdout, one per rule hit:

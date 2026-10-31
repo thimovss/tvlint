@@ -49,8 +49,11 @@ impl Config {
     pub fn load(path: &Path) -> Result<Config> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read {}", path.display()))?;
-        let config: Config = serde_yaml_ng::from_str(&text)
-            .with_context(|| format!("invalid config {}", path.display()))?;
+        Config::parse(&text).with_context(|| format!("invalid config {}", path.display()))
+    }
+
+    pub fn parse(text: &str) -> Result<Config> {
+        let config: Config = serde_yaml_ng::from_str(text)?;
         config.validate()?;
         Ok(config)
     }

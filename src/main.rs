@@ -1,6 +1,8 @@
 mod check;
 mod config;
+mod scope;
 mod source;
+mod validate;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -8,10 +10,10 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
 
 use check::{ClassIndex, CompiledRule, Violation, check_file};
-use config::{Config, Scope};
+use config::Config;
+use scope::CompiledScope;
 
 #[derive(Parser)]
 #[command(name = "prlint", version, about = "Enforce your team's code rules deterministically")]
@@ -40,6 +42,8 @@ enum Command {
     },
     /// List all configured rules
     List,
+    /// Check the config file for mistakes and explain every problem (exit 1 if invalid)
+    Validate,
 }
 
 fn main() -> ExitCode {
@@ -48,6 +52,7 @@ fn main() -> ExitCode {
         Command::Check { staged } => check(&cli.config, staged).map(|violations| u8::from(violations > 0)),
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
+        Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
     };
     match result {
         Ok(code) => ExitCode::from(code),
@@ -169,37 +174,4 @@ fn list(config_path: &Path) -> Result<()> {
         println!("{id:<width$}  {:?}  {scopes} scope(s)", rule.language);
     }
     Ok(())
-}
-
-struct CompiledScope<'a> {
-    rules: &'a [String],
-    include: GlobSet,
-    exclude: GlobSet,
-}
-
-impl<'a> CompiledScope<'a> {
-    fn new(scope: &'a Scope) -> Result<Self> {
-        Ok(CompiledScope {
-            rules: &scope.rules,
-            include: path_globs(&scope.include)?,
-            exclude: path_globs(&scope.exclude)?,
-        })
-    }
-
-    fn matches(&self, path: &str) -> bool {
-        self.include.is_match(path) && !self.exclude.is_match(path)
-    }
-}
-
-/// Path globs where `*` stays within one directory and `**` crosses directories.
-fn path_globs(patterns: &[String]) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob: Glob = GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-            .with_context(|| format!("invalid glob `{pattern}`"))?;
-        builder.add(glob);
-    }
-    Ok(builder.build()?)
 }
