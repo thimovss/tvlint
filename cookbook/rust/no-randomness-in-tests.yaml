@@ -1,0 +1,14 @@
+# No unseeded randomness in integration tests
+# Random values make a test pass or fail by chance, and a failure cannot be reproduced
+# because the input is gone. A seeded generator (StdRng::seed_from_u64) is fine.
+
+rules:
+  no-randomness-in-tests:
+    language: rust
+    forbid_call: ["rand::random", "random", "thread_rng", "rand::thread_rng", "rand::rng", "Uuid::new_v4", "uuid::Uuid::new_v4"]
+    rationale: Unseeded randomness makes tests flaky, and a failure cannot be reproduced.
+    fix: Use fixed values, or a generator seeded with a constant, e.g. StdRng::seed_from_u64(42).
+
+scopes:
+  - rules: [no-randomness-in-tests]
+    include: ["tests/**"]

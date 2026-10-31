@@ -2,7 +2,7 @@
 
 Enforce your team's code rules deterministically. Rules live in a YAML file, violations come back with a reason and a fix so both humans and AI agents can act on them.
 
-Supports Python, JavaScript and TypeScript.
+Supports Python, JavaScript, TypeScript and Rust.
 
 ## Install
 
@@ -88,8 +88,9 @@ backend/src/auth/router/save_attribute.py:39:13: error[no-http-exceptions] raisi
 | `python` | `.py` |
 | `javascript` | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | `typescript` | `.ts`, `.tsx`, `.mts`, `.cts` |
+| `rust` | `.rs` |
 
-Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called), so the rule keys mean the same thing everywhere.
+Rules are written once and apply to every language they name, for example `language: [javascript, typescript]` for a rule on a mixed codebase. Each language has an adapter that maps its syntax tree to the same few questions the rules ask (what is thrown, what is called, what is imported). Not every language can express every check: Rust has no exceptions, so it has no `forbid_raise` or `forbid_catch`, and only JavaScript and TypeScript have JSX and object-literal checks. `prlint validate` says so when a rule asks a language for something it cannot do.
 
 ## Suppressing violations
 
@@ -146,11 +147,11 @@ scopes:
 
 | Key | Meaning |
 |---|---|
-| `language` | `python`, `javascript` or `typescript`, or a list such as `[javascript, typescript]`. Limits the rule to files of those languages. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
-| `forbid_raise` | Exception names that may not be raised (`throw` in JavaScript and TypeScript, where `throw new Foo()` names `Foo`). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
-| `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. Imports and aliases are not resolved. |
+| `language` | `python`, `javascript`, `typescript` or `rust`, or a list such as `[javascript, typescript]`. Limits the rule to files of those languages. Required with `forbid_*` checks. Optional with `require_filename`, where omitting it applies the rule to every file type. |
+| `forbid_raise` | Python, JavaScript and TypeScript. Exception names that may not be raised (`throw` in JavaScript and TypeScript, where `throw new Foo()` names `Foo`). Matches the full dotted name or its last part, so `HTTPException` also matches `fastapi.HTTPException`. Bare `raise` (re-raise) is allowed. |
+| `forbid_call` | Call patterns that are forbidden. `*` matches anything, so `*.one` matches `session.exec(q).one()` and `console.*` matches `console.log(...)`. In JavaScript and TypeScript, `new Foo()` counts as a call to `Foo`. In Rust, functions are written with `::` (`std::fs::read`, `Vec::new`), methods with `.` (`*.unwrap` matches `s.parse::<i32>().unwrap()`), and macros with their `!` (`println!`); calls inside a macro's arguments are not seen. Imports and aliases are not resolved. |
 | `forbid_catch` | Python only, because JavaScript and TypeScript `catch` clauses have no exception type. `subclass_of: Name` forbids `except` clauses that catch `Name` or any class inheriting from it. Subclasses are found by class name across the whole project, not by import path. |
-| `forbid_import` | JavaScript and TypeScript. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). |
+| `forbid_import` | JavaScript, TypeScript and Rust. Module specifiers that may not be imported (`import`, `export ... from`, `import()`, `require()`; in Rust `use` and `extern crate`, where `use a::{b, c}` counts as `a::b` and `a::c`, and `self::` and `super::` are resolved to `crate::` paths). Relative imports and imports through an alias are matched by their project path (`src/hooks/use-mobile.ts`), anything else by the specifier as written (`@base-ui/react/dialog`). Patterns are path globs: `*` stays within one segment, `**` crosses segments, so list a package and its subpaths (`react-aria-components`, `react-aria-components/**`). Rust patterns are written with `::` (`sqlx::**`, `crate::db::**`). |
 | `except_import` | Imports that are fine although they match `forbid_import`. Together they express "this folder may only import from here": `forbid_import: ["src/**"]` with `except_import: ["src/components/ui/**"]`. |
 | `forbid_element` | JavaScript and TypeScript. JSX element names that may not be used, e.g. `[button, textarea]`. Matched on the tag as written, so `button` does not match `Button`. |
 | `forbid_property` | JavaScript and TypeScript. Object-literal property names that may not appear (`{ onError: ... }`). JSX attributes such as `<img onError={...}>` are not properties. |

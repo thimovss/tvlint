@@ -28,6 +28,7 @@ pub struct Parsers {
     javascript: Parser,
     typescript: Parser,
     tsx: Parser,
+    rust: Parser,
 }
 
 impl Parsers {
@@ -42,6 +43,7 @@ impl Parsers {
             javascript: parser("javascript", tree_sitter_javascript::LANGUAGE.into())?,
             typescript: parser("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())?,
             tsx: parser("tsx", tree_sitter_typescript::LANGUAGE_TSX.into())?,
+            rust: parser("rust", tree_sitter_rust::LANGUAGE.into())?,
         })
     }
 
@@ -54,6 +56,7 @@ impl Parsers {
             Language::JavaScript => &mut self.javascript,
             Language::TypeScript if path.extension().is_some_and(|e| e == "tsx") => &mut self.tsx,
             Language::TypeScript => &mut self.typescript,
+            Language::Rust => &mut self.rust,
         };
         parser.parse(text, None).map(|tree| (language, tree))
     }

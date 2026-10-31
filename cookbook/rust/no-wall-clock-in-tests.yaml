@@ -1,0 +1,15 @@
+# No wall clock in integration tests
+# A test that reads the real clock depends on when it runs. Pass the time in, or inject a
+# clock. Only the tests/ directory is covered: unit tests in a `#[cfg(test)] mod tests` sit
+# in the same file as the code under test, and a rule cannot tell them apart.
+
+rules:
+  no-wall-clock-in-tests:
+    language: rust
+    forbid_call: ["SystemTime::now", "Instant::now", "Utc::now", "Local::now", "chrono::Utc::now", "chrono::Local::now"]
+    rationale: Reading the real clock makes a test depend on when it runs, so it can fail at certain times and the failure cannot be reproduced.
+    fix: Use a fixed timestamp, or give the code under test a clock it can be handed.
+
+scopes:
+  - rules: [no-wall-clock-in-tests]
+    include: ["tests/**"]

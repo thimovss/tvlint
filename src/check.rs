@@ -91,52 +91,9 @@ fn compile(patterns: &[String]) -> Result<GlobSet> {
 fn compile_paths(patterns: &[String]) -> Result<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        builder.add(GlobBuilder::new(pattern).literal_separator(true).build()?);
+        builder.add(GlobBuilder::new(&pattern.replace("::", "/")).literal_separator(true).build()?);
     }
     Ok(builder.build()?)
-}
-
-const EXTENSIONS: &[&str] = &[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".json"];
-
-/// The project path an import points at, or the specifier itself for a package.
-/// `./x` and `../x` are resolved against the importing file, aliases are expanded, and a path
-/// without extension is matched to the file that exists (`x.ts`, `x/index.tsx`, ...).
-pub fn resolve_import(specifier: &str, file_path: &str, ctx: &Project) -> String {
-    let local = if specifier.starts_with("./") || specifier.starts_with("../") {
-        let mut parts: Vec<&str> = file_path.split('/').collect();
-        parts.pop(); // the file name
-        for segment in specifier.split('/') {
-            match segment {
-                "." | "" => {}
-                ".." => {
-                    if parts.pop().is_none() {
-                        return specifier.to_string(); // leaves the project
-                    }
-                }
-                other => parts.push(other),
-            }
-        }
-        Some(parts.join("/"))
-    } else {
-        ctx.aliases
-            .iter()
-            .filter(|(prefix, _)| specifier.starts_with(prefix.as_str()))
-            .max_by_key(|(prefix, _)| prefix.len())
-            .map(|(prefix, target)| format!("{target}{}", &specifier[prefix.len()..]))
-    };
-    let Some(path) = local else { return specifier.to_string() };
-    let path = path.trim_end_matches('/').to_string();
-    if ctx.paths.contains(&path) {
-        return path;
-    }
-    for ext in EXTENSIONS {
-        for candidate in [format!("{path}{ext}"), format!("{path}/index{ext}")] {
-            if ctx.paths.contains(&candidate) {
-                return candidate;
-            }
-        }
-    }
-    path
 }
 
 /// Class name -> names of its direct bases, across every file in the project.
@@ -255,14 +212,19 @@ pub fn check_file(
         {
             report(node, format!("calling `{name}` is forbidden"));
         }
-        if !rule.import.is_empty()
-            && let Some(specifier) = adapter.import_specifier(node, src)
-        {
-            let resolved = resolve_import(&specifier, &file.path, ctx);
-            let hits = |set: &GlobSet| set.is_match(&specifier) || set.is_match(&resolved);
-            if hits(&rule.import) && !hits(&rule.except_import) {
-                let target = if resolved == specifier { String::new() } else { format!(" ({resolved})") };
-                report(node, format!("importing `{specifier}`{target} is forbidden"));
+        if !rule.import.is_empty() {
+            // Rust writes paths with `::`; matching treats them as `/` like every other path.
+            let key = |s: &str| s.replace("::", "/");
+            for import in adapter.imports(node, src, &file.path, ctx) {
+                let hits = |set: &GlobSet| set.is_match(key(&import.specifier)) || set.is_match(key(&import.resolved));
+                if hits(&rule.import) && !hits(&rule.except_import) {
+                    let target = if import.resolved == import.specifier {
+                        String::new()
+                    } else {
+                        format!(" ({})", import.resolved)
+                    };
+                    report(node, format!("importing `{}`{target} is forbidden", import.specifier));
+                }
             }
         }
         if !rule.element.is_empty()
@@ -479,6 +441,7 @@ try:\n    pass\nexcept Leaf as e:\n    pass\ntry:\n    pass\nexcept (KeyError, m
             ("a.ts", Language::TypeScript),
             ("a.tsx", Language::TypeScript),
             ("a.mts", Language::TypeScript),
+            ("a.rs", Language::Rust),
         ] {
             assert_eq!(parse(path, "").language, language, "{path}");
         }
@@ -604,6 +567,122 @@ useQuery({ queryKey: [...base, accountID] });\n";
         let found = hits("t.ts", src, &r);
         assert_eq!(found.iter().map(|h| h.0).collect::<Vec<_>>(), [2, 4, 6]);
         assert!(found[1].1.contains("an empty array"), "{found:?}");
+    }
+
+    // ---- Rust
+
+    fn rs_rule() -> Rule {
+        Rule { language: vec![Language::Rust], ..empty_rule() }
+    }
+
+    #[test]
+    fn rust_calls_cover_functions_methods_and_macros() {
+        let src = "fn f() {\n    let a = Vec::new();\n    let b = x.unwrap();\n    let c = s.parse::<i32>().unwrap();\n\
+    let d = foo()?.bar();\n    println!(\"hi\");\n    std::fs::read_to_string(\"p\").expect(\"e\");\n    panic!(\"no\");\n    (a.b)();\n    Vec::<i32>::new();\n}\n";
+        let r = Rule {
+            forbid_call: vec!["Vec::new".into(), "*.unwrap".into(), "*.bar".into(), "println!".into(), "std::fs::*".into(), "*.expect".into(), "panic!".into(), "a.b".into()],
+            ..rs_rule()
+        };
+        // Vec::<i32>::new() is Vec::new too (generics are looked through).
+        assert_eq!(lines("a.rs", src, &r), [2, 3, 4, 5, 6, 7, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn rust_does_not_see_calls_inside_macro_arguments() {
+        // Tree-sitter keeps a macro's arguments as flat tokens, so this unwrap is invisible.
+        let src = "fn f() { assert_eq!(x.unwrap(), 1); }\n";
+        let r = Rule { forbid_call: vec!["*.unwrap".into(), "assert_eq!".into()], ..rs_rule() };
+        assert_eq!(hits("a.rs", src, &r).len(), 1);
+    }
+
+    fn imports(path: &str, source: &str, forbid: &[&str], except: &[&str]) -> Vec<String> {
+        let r = Rule {
+            forbid_import: forbid.iter().map(|s| s.to_string()).collect(),
+            except_import: except.iter().map(|s| s.to_string()).collect(),
+            ..rs_rule()
+        };
+        hits(path, source, &r).into_iter().map(|h| h.1).collect()
+    }
+
+    #[test]
+    fn rust_use_declarations_are_expanded() {
+        let src = "use std::collections::{HashMap, hash_map::Entry, self};\nuse a::b as c;\npub use d::e::F;\nuse g::*;\nextern crate h;\nuse {i::j, k};\n";
+        let all = imports("src/lib.rs", src, &["**"], &[]);
+        assert_eq!(
+            all,
+            [
+                "importing `std::collections::HashMap` is forbidden",
+                "importing `std::collections::hash_map::Entry` is forbidden",
+                "importing `std::collections` is forbidden",
+                "importing `a::b` is forbidden",
+                "importing `d::e::F` is forbidden",
+                "importing `g::*` is forbidden",
+                "importing `h` is forbidden",
+                "importing `i::j` is forbidden",
+                "importing `k` is forbidden",
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_patterns_are_written_with_double_colons() {
+        let src = "use sqlx::PgPool;\nuse sqlx;\nuse crate::db::Pool;\nuse crate::api::Router;\nuse std::fmt;\n";
+        let found = imports("src/domain/user.rs", src, &["sqlx", "sqlx::**", "crate::db::**"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `sqlx::PgPool` is forbidden",
+                "importing `sqlx` is forbidden",
+                "importing `crate::db::Pool` is forbidden",
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_self_and_super_resolve_to_the_module_path() {
+        // src/api/handlers.rs is the module crate::api::handlers.
+        let src = "use super::db::Pool;\nuse self::helpers::h;\nuse super::super::config::Settings;\nuse crate::db::Pool as P;\n";
+        let found = imports("crate/src/api/handlers.rs", src, &["crate::api::**", "crate::config::**"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `super::db::Pool` (crate::api::db::Pool) is forbidden",
+                "importing `self::helpers::h` (crate::api::handlers::helpers::h) is forbidden",
+                "importing `super::super::config::Settings` (crate::config::Settings) is forbidden",
+            ]
+        );
+        // mod.rs and lib.rs are their directory's module, and the crate root.
+        let found = imports("src/api/mod.rs", "use self::x::Y;\n", &["crate::api::x::**"], &[]);
+        assert_eq!(found, ["importing `self::x::Y` (crate::api::x::Y) is forbidden"]);
+        let found = imports("src/lib.rs", "use self::x::Y;\n", &["crate::x::**"], &[]);
+        assert_eq!(found, ["importing `self::x::Y` (crate::x::Y) is forbidden"]);
+    }
+
+    #[test]
+    fn rust_inline_modules_are_part_of_the_module_path() {
+        let src = "use super::*;\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use super::helper;\n}\n";
+        let found = imports("src/a.rs", src, &["crate::**"], &[]);
+        assert_eq!(
+            found,
+            [
+                "importing `super::*` (crate::*) is forbidden", // a top-level module's parent is the crate root
+                "importing `super::*` (crate::a::*) is forbidden",
+                "importing `super::helper` (crate::a::helper) is forbidden",
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_super_above_the_crate_root_is_left_as_written() {
+        let found = imports("src/lib.rs", "use super::x;\n", &["super::**"], &[]);
+        assert_eq!(found, ["importing `super::x` is forbidden"]);
+    }
+
+    #[test]
+    fn rust_import_exceptions() {
+        let src = "use crate::domain::User;\nuse crate::infra::Db;\nuse std::fmt;\n";
+        let found = imports("src/domain/user.rs", src, &["crate::**"], &["crate::domain::**"]);
+        assert_eq!(found, ["importing `crate::infra::Db` is forbidden"]);
     }
 
     // ---- file names

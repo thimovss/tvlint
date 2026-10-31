@@ -31,7 +31,8 @@ impl Suppressions {
         }
         let first_line_start = file.text.strip_prefix('\u{feff}').map_or(0, |_| '\u{feff}'.len_utf8());
         visit(file.tree.root_node(), &mut |node| {
-            if node.kind() != "comment" {
+            // `comment` in Python, JavaScript and TypeScript; `line_comment` and `block_comment` in Rust.
+            if !node.kind().ends_with("comment") {
                 return;
             }
             let Some(directive) = directive(&file.text[node.byte_range()]) else { return };
@@ -45,7 +46,11 @@ impl Suppressions {
                 }
                 _ => {
                     // The comment may be a block comment spanning lines: the next line is after its end.
-                    found.next_lines.insert(node.end_position().row + 2);
+                    let mut end_row = node.end_position().row;
+                    if file.text[node.byte_range()].ends_with('\n') {
+                        end_row -= 1; // some grammars put a line comment's newline inside the node
+                    }
+                    found.next_lines.insert(end_row + 2);
                 }
             }
         });
@@ -92,6 +97,16 @@ mod tests {
         assert_eq!(hidden("a.ts", "a;\n// prlint-ignore-next-line\nb;\nc;\n"), [3]);
         assert_eq!(hidden("a.ts", "a;\n/* prlint-ignore-next-line */\nb;\nc;\n"), [3]);
         assert_eq!(hidden("a.tsx", "const a = (\n  <div>\n    {/* prlint-ignore-next-line */}\n    <button />\n  </div>\n);\n"), [4]);
+    }
+
+    #[test]
+    fn rust_comments() {
+        assert_eq!(hidden("a.rs", "fn f() {\n    // prlint-ignore-next-line\n    x.unwrap();\n    y.unwrap();\n}\n"), [3]);
+        assert_eq!(hidden("a.rs", "/* prlint-ignore-next-line */\nx.unwrap();\n"), [2]);
+        assert_eq!(hidden("a.rs", "/// prlint-ignore-next-line\nfn f() {}\n"), [2]);
+        assert!(hidden("a.rs", "let s = \"// prlint-ignore-next-line\";\nx;\n").is_empty());
+        assert!(scan("a.rs", "// prlint-ignore-file\nfn f() {}\n").ignore_file);
+        assert!(!scan("a.rs", "fn f() {}\n// prlint-ignore-file\n").ignore_file);
     }
 
     #[test]

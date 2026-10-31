@@ -20,20 +20,56 @@ pub enum Language {
     Python,
     JavaScript,
     TypeScript,
+    Rust,
 }
 
 impl Language {
+    pub const ALL: &'static [Language] = &[Language::Python, Language::JavaScript, Language::TypeScript, Language::Rust];
+
     pub fn name(self) -> &'static str {
         match self {
             Language::Python => "python",
             Language::JavaScript => "javascript",
             Language::TypeScript => "typescript",
+            Language::Rust => "rust",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Language> {
+        Language::ALL.iter().copied().find(|l| l.name() == name)
+    }
+
+    /// Whether the language can express the check behind a rule key.
+    pub fn supports(self, key: &str) -> bool {
+        use Language::*;
+        match key {
+            "forbid_raise" => matches!(self, Python | JavaScript | TypeScript),
+            "forbid_catch" => self == Python,
+            "forbid_import" | "except_import" => matches!(self, JavaScript | TypeScript | Rust),
+            "forbid_element" | "forbid_property" | "property_value" | "within_property" => {
+                matches!(self, JavaScript | TypeScript)
+            }
+            _ => true,
+        }
+    }
+
+    /// Why a key is not available, and what to use instead.
+    pub fn unsupported_hint(self, key: &str) -> &'static str {
+        match (self, key) {
+            (Language::Rust, "forbid_raise") => {
+                "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""
+            }
+            (_, "forbid_catch") => "only Python `except` clauses name the type they catch",
+            (Language::Python, "forbid_import" | "except_import") => "import rules are not supported for Python yet",
+            (_, "forbid_import" | "except_import") => "import rules are not supported for this language",
+            _ => "JSX elements and object literals exist only in JavaScript and TypeScript",
         }
     }
 
     pub fn from_path(path: &Path) -> Option<Language> {
         match path.extension()?.to_str()? {
             "py" => Some(Language::Python),
+            "rs" => Some(Language::Rust),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             _ => None,
@@ -139,16 +175,16 @@ pub struct Scope {
 
 impl Rule {
     pub fn has_code_checks(&self) -> bool {
-        !self.forbid_raise.is_empty()
-            || !self.forbid_call.is_empty()
-            || self.forbid_catch.is_some()
-            || self.uses_ecmascript_checks()
+        !self.code_keys().is_empty()
     }
 
-    /// The checks that only exist for JavaScript and TypeScript.
-    pub fn ecmascript_keys(&self) -> Vec<&'static str> {
+    /// The code checks this rule uses, by rule key.
+    pub fn code_keys(&self) -> Vec<&'static str> {
         let mut keys = Vec::new();
         for (key, present) in [
+            ("forbid_raise", !self.forbid_raise.is_empty()),
+            ("forbid_call", !self.forbid_call.is_empty()),
+            ("forbid_catch", self.forbid_catch.is_some()),
             ("forbid_import", !self.forbid_import.is_empty()),
             ("except_import", !self.except_import.is_empty()),
             ("forbid_element", !self.forbid_element.is_empty()),
@@ -163,8 +199,11 @@ impl Rule {
         keys
     }
 
-    pub fn uses_ecmascript_checks(&self) -> bool {
-        !self.ecmascript_keys().is_empty()
+    /// The first check that one of the rule's languages cannot express.
+    pub fn unsupported(&self) -> Option<(&'static str, Language)> {
+        self.code_keys()
+            .into_iter()
+            .find_map(|key| self.language.iter().find(|l| !l.supports(key)).map(|l| (key, *l)))
     }
 
     /// One line per check, for `explain` and `validate`.
@@ -251,16 +290,11 @@ impl Config {
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
                 bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value or require_filename)");
             }
-            if rule.forbid_catch.is_some() && rule.language.iter().any(|l| *l != Language::Python) {
-                bail!("rule `{id}`: forbid_catch is only supported for python, JavaScript and TypeScript catch clauses have no exception type");
-            }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
             }
-            if let Some(key) = rule.ecmascript_keys().first()
-                && rule.language.contains(&Language::Python)
-            {
-                bail!("rule `{id}`: {key} is only supported for JavaScript and TypeScript");
+            if let Some((key, language)) = rule.unsupported() {
+                bail!("rule `{id}`: {key} is not supported for {} ({})", language.name(), language.unsupported_hint(key));
             }
             if !rule.except_import.is_empty() && rule.forbid_import.is_empty() {
                 bail!("rule `{id}`: except_import needs forbid_import");

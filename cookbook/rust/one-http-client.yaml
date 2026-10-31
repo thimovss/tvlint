@@ -1,0 +1,15 @@
+# One place talks HTTP
+# Wrapping the HTTP client in a single module keeps timeouts, retries and authentication in
+# one place. Everything else calls the wrapper.
+
+rules:
+  one-http-client:
+    language: rust
+    forbid_import: ["reqwest", "reqwest::**", "ureq", "ureq::**", "hyper", "hyper::**"]
+    rationale: Each direct use of the HTTP client needs its own timeout, retry and auth handling, and they drift apart.
+    fix: Add a function to src/infra/http.rs and call that.
+
+scopes:
+  - rules: [one-http-client]
+    include: ["src/**"]
+    exclude: ["src/infra/http.rs"]

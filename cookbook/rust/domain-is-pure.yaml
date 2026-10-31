@@ -1,0 +1,26 @@
+# The domain layer must not depend on infrastructure
+# Domain code holds the business rules. If it imports the web layer, the database or an
+# HTTP client, it can no longer be tested or reused without them.
+# Patterns are written with `::`. List a crate and its paths separately: "sqlx" and "sqlx::**".
+# Adjust the crate::... module names to your layout.
+
+rules:
+  domain-is-pure:
+    language: rust
+    forbid_import:
+      - "crate::api::**"
+      - "crate::infra::**"
+      - "sqlx"
+      - "sqlx::**"
+      - "diesel"
+      - "diesel::**"
+      - "reqwest"
+      - "reqwest::**"
+      - "axum"
+      - "axum::**"
+    rationale: Domain code is the part you want to test without a database, a network or a web framework. Importing them ties the business rules to how they are delivered.
+    fix: Define a trait in the domain for what you need and implement it in src/infra. Pass the implementation in.
+
+scopes:
+  - rules: [domain-is-pure]
+    include: ["src/domain/**"]

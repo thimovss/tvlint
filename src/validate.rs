@@ -6,7 +6,7 @@ use globset::{Glob, GlobBuilder};
 use serde_yaml_ng::{Mapping, Value};
 
 use crate::check::ClassIndex;
-use crate::config::Config;
+use crate::config::{Config, Language};
 use crate::scope::CompiledScope;
 use crate::source;
 
@@ -16,12 +16,12 @@ const TOP_KEYS: &[(&str, &str)] = &[
     ("aliases", "optional; import prefix to project path, e.g. `\"@/\": \"src/\"`"),
 ];
 const RULE_KEYS: &[(&str, &str)] = &[
-    ("language", "`python`, `javascript` or `typescript`, or a list of them; required with forbid_* checks"),
-    ("forbid_raise", "list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
-    ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`"),
+    ("language", "`python`, `javascript`, `typescript` or `rust`, or a list of them; required with forbid_* checks"),
+    ("forbid_raise", "Python, JS/TS; list of exception names that must not be raised (`throw` in JavaScript and TypeScript)"),
+    ("forbid_call", "list of call patterns that must not appear; `*` matches anything, e.g. `*.one`; Rust macros end in `!`"),
     ("forbid_catch", "python only; `subclass_of: Name` forbids catching Name or any class inheriting from it"),
-    ("forbid_import", "JS/TS; module specifiers that must not be imported; relative and aliased imports match by project path"),
-    ("except_import", "JS/TS; imports that are fine although they match forbid_import"),
+    ("forbid_import", "JS/TS and Rust; module specifiers that must not be imported; relative and aliased imports match by project path"),
+    ("except_import", "JS/TS and Rust; imports that are fine although they match forbid_import"),
     ("forbid_element", "JS/TS; JSX element names that must not be used, e.g. `button`"),
     ("forbid_property", "JS/TS; object-literal property names that must not appear"),
     ("property_value", "JS/TS; `names`, plus `forbid_literal` and/or `array_starts_with`, and optionally `in_call`"),
@@ -35,7 +35,7 @@ const SCOPE_KEYS: &[(&str, &str)] = &[
     ("include", "required; list of path globs relative to the config file's directory"),
     ("exclude", "optional; list of path globs to leave out"),
 ];
-const LANGUAGES: &[&str] = &["python", "javascript", "typescript"];
+const LANGUAGES: &[&str] = &["python", "javascript", "typescript", "rust"];
 
 struct Diagnostic {
     path: String,
@@ -333,13 +333,6 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
     }
     if let Some(value) = rule.get("forbid_catch") {
         checks += 1;
-        if languages.iter().any(|l| l != "python") {
-            report.error(
-                &format!("{path}.forbid_catch"),
-                "forbid_catch is only supported for python",
-                Some("JavaScript and TypeScript catch clauses have no exception type; use `language: python` or remove forbid_catch".into()),
-            );
-        }
         let catch_path = format!("{path}.forbid_catch");
         if let Some(map) = expect_mapping(value, &catch_path, "a mapping like `{ subclass_of: SomeError }`", report) {
             check_keys(map, &catch_path, &[("subclass_of", "required; class name whose subclasses may not be caught")], report);
@@ -350,7 +343,8 @@ fn validate_rule(path: &str, value: &Value, report: &mut Report) {
             }
         }
     }
-    validate_ecmascript_keys(rule, path, &languages, &mut checks, report);
+    validate_language_support(rule, path, &languages, report);
+    validate_ecmascript_keys(rule, path, &mut checks, report);
     if checks == 0 {
         report.error(
             path,
@@ -380,8 +374,33 @@ fn validate_aliases(value: &Value, report: &mut Report) {
     }
 }
 
+/// Each language can express some checks and not others: say which, and what to use instead.
+fn validate_language_support(rule: &Mapping, path: &str, languages: &[String], report: &mut Report) {
+    const KEYS: &[&str] = &[
+        "forbid_raise",
+        "forbid_catch",
+        "forbid_import",
+        "except_import",
+        "forbid_element",
+        "forbid_property",
+        "property_value",
+        "within_property",
+    ];
+    for key in KEYS.iter().filter(|k| rule.get(**k).is_some()) {
+        for language in languages.iter().filter_map(|l| Language::from_name(l)) {
+            if !language.supports(key) {
+                report.error(
+                    &format!("{path}.{key}"),
+                    format!("{key} is not supported for {}", language.name()),
+                    Some(format!("{}; remove {} from `language`, or move this check to a rule of its own", language.unsupported_hint(key), language.name())),
+                );
+            }
+        }
+    }
+}
+
 /// The JS/TS-only keys: forbid_import, except_import, forbid_element, forbid_property, property_value, within_property.
-fn validate_ecmascript_keys(rule: &Mapping, path: &str, languages: &[String], checks: &mut usize, report: &mut Report) {
+fn validate_ecmascript_keys(rule: &Mapping, path: &str, checks: &mut usize, report: &mut Report) {
     const KEYS: &[&str] = &[
         "forbid_import",
         "except_import",
@@ -393,13 +412,6 @@ fn validate_ecmascript_keys(rule: &Mapping, path: &str, languages: &[String], ch
     let present: Vec<&str> = KEYS.iter().copied().filter(|k| rule.get(*k).is_some()).collect();
     if present.is_empty() {
         return;
-    }
-    if languages.iter().any(|l| l == "python") {
-        report.error(
-            &format!("{path}.{}", present[0]),
-            format!("{} {} only supported for JavaScript and TypeScript", present.join(", "), if present.len() == 1 { "is" } else { "are" }),
-            Some("set `language: [javascript, typescript]`, or split the Python checks into their own rule".into()),
-        );
     }
     for key in ["forbid_import", "except_import"] {
         if let Some(value) = rule.get(key) {
@@ -756,7 +768,7 @@ scopes:
             "forbid_catch: { subclass_of: AppError }",
         );
         let found = errors(&yaml);
-        assert!(has(&found, "rules.no-http.forbid_catch", "only supported for python"), "{found:?}");
+        assert!(has(&found, "rules.no-http.forbid_catch", "not supported for typescript"), "{found:?}");
         let ok = GOOD.replace("forbid_raise: [HTTPException]", "forbid_catch: { subclass_of: AppError }");
         assert!(errors(&ok).is_empty());
     }
@@ -813,7 +825,7 @@ scopes:
             "    fix: how\n    forbid_import: [x]\n",
         );
         let found = errors(&yaml);
-        assert!(has(&found, "rules.r.forbid_import", "only supported for JavaScript and TypeScript"), "{found:?}");
+        assert!(has(&found, "rules.r.forbid_import", "not supported for python"), "{found:?}");
     }
 
     #[test]
@@ -822,6 +834,33 @@ scopes:
         let found = errors(&yaml);
         assert!(has(&found, "aliases.@/", "must both end with"), "{found:?}");
         assert!(errors(&format!("aliases:\n  \"@/\": src/\n{GOOD}")).is_empty());
+    }
+
+    #[test]
+    fn rust_rules_accept_calls_and_imports() {
+        for extra in [
+            "    forbid_call: [\"*.unwrap\", \"println!\"]\n",
+            "    forbid_import: [\"sqlx\", \"sqlx::**\"]\n    except_import: [\"crate::db::**\"]\n",
+        ] {
+            let yaml = ES_RULE.replace("language: typescript", "language: rust").replace("    fix: how\n", &format!("    fix: how\n{extra}"));
+            assert!(errors(&yaml).is_empty(), "{extra}: {:?}", errors(&yaml));
+        }
+    }
+
+    #[test]
+    fn rust_has_no_exceptions_or_jsx() {
+        let rust = |extra: &str| {
+            errors(&ES_RULE.replace("language: typescript", "language: rust").replace("    fix: how\n", &format!("    fix: how\n{extra}")))
+        };
+        let found = rust("    forbid_raise: [Error]\n");
+        assert!(has(&found, "rules.r.forbid_raise", "not supported for rust"), "{found:?}");
+        let found = rust("    forbid_catch: { subclass_of: E }\n");
+        assert!(has(&found, "rules.r.forbid_catch", "not supported for rust"), "{found:?}");
+        let found = rust("    forbid_element: [button]\n");
+        assert!(has(&found, "rules.r.forbid_element", "not supported for rust"), "{found:?}");
+        let mixed = errors(&ES_RULE.replace("language: typescript", "language: [typescript, rust]").replace("    fix: how\n", "    fix: how\n    forbid_raise: [E]\n"));
+        assert!(has(&mixed, "rules.r.forbid_raise", "not supported for rust"), "{mixed:?}");
+        assert!(!has(&mixed, "rules.r.forbid_raise", "not supported for typescript"), "{mixed:?}");
     }
 
     #[test]
