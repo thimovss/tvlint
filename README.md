@@ -26,7 +26,7 @@ prlint [OPTIONS] [COMMAND]
 
 | Command | What it does |
 |---|---|
-| `check` | Checks the whole project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. |
+| `check` | Checks the project against all rules and prints every violation. This is the default when no command is given, so `prlint` and `prlint check` are the same. |
 | `list` | Lists all configured rules with their language and the number of scopes that use them. |
 | `explain <rule>` | Shows why a rule exists, the fix, what it forbids, and which paths it applies to. |
 | `help [command]` | Prints help for prlint or for one command. |
@@ -35,6 +35,7 @@ prlint [OPTIONS] [COMMAND]
 
 | Flag | What it does |
 |---|---|
+| `--staged` | `check` only. Checks only the files staged in git, using their staged contents, so unstaged edits are ignored. Meant for pre-commit hooks. Needs a git repository (exit `2` otherwise). Only staged files under the project root are considered. |
 | `-c, --config <path>` | Path to the config file. Defaults to `prlint.yaml` in the current directory. The project root is the directory containing this file, and scope paths are relative to it. Works with every command. |
 | `-h, --help` | Prints help. |
 | `-V, --version` | Prints the version. |

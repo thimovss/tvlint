@@ -28,7 +28,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Check the project against all rules (exit 1 if any violation is found)
-    Check,
+    Check {
+        /// Only check files staged in git (as they are in the index)
+        #[arg(long)]
+        staged: bool,
+    },
     /// Show why a rule exists, what it forbids and where it applies
     Explain {
         /// Rule id, as listed by `prlint list`
@@ -40,8 +44,8 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command.unwrap_or(Command::Check) {
-        Command::Check => check(&cli.config).map(|violations| u8::from(violations > 0)),
+    let result = match cli.command.unwrap_or(Command::Check { staged: false }) {
+        Command::Check { staged } => check(&cli.config, staged).map(|violations| u8::from(violations > 0)),
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
     };
@@ -55,7 +59,7 @@ fn main() -> ExitCode {
 }
 
 /// Returns the number of violations found.
-fn check(config_path: &Path) -> Result<usize> {
+fn check(config_path: &Path, staged: bool) -> Result<usize> {
     let config = Config::load(config_path)?;
     let root = std::path::absolute(config_path)?
         .parent()
@@ -69,11 +73,22 @@ fn check(config_path: &Path) -> Result<usize> {
         .collect::<Result<BTreeMap<_, _>>>()?;
     let scopes = config.scopes.iter().map(CompiledScope::new).collect::<Result<Vec<_>>>()?;
 
-    let files = source::load_all(&root)?;
+    let mut files = source::load_all(&root)?;
+    // Staged mode still parses the whole project: subclass lookups need every class.
+    let staged_paths = if staged {
+        let paths = source::staged_paths(&root)?;
+        source::use_index_contents(&mut files, &paths, &root)?;
+        Some(paths)
+    } else {
+        None
+    };
     let index = ClassIndex::build(&files);
     // A file can be matched by several scopes naming the same rule; run each pair once.
     let mut jobs: BTreeSet<(usize, &str)> = BTreeSet::new();
     for (file_idx, file) in files.iter().enumerate() {
+        if staged_paths.as_ref().is_some_and(|paths| !paths.contains(&file.path)) {
+            continue;
+        }
         for scope in scopes.iter().filter(|s| s.matches(&file.path)) {
             for id in scope.rules {
                 if rules[id.as_str()].rule.language == file.language {
