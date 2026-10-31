@@ -4,5 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.104"
+globset = "0.4.21"
+ignore = "0.4.34"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml_ng = "0.10.0"
+tree-sitter = "0.27.1"
+tree-sitter-python = "0.25.0"
+
+[[bin]]
+name = "prlint"
+path = "src/main.rs"
