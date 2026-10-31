@@ -4,7 +4,8 @@ Done items are removed from this list.
 
 ## Needs a decision
 
-1. **CLAUDE.md open questions**, still unanswered: open-core vs commercial, shareable rule packs, how much cross-file analysis is worth it.
+1. **License.** The project is fully open source for now (decided), but there is no LICENSE file and `Cargo.toml` has no `license` field. Pick one (MIT/Apache-2.0 is the usual Rust choice).
+2. **CLAUDE.md open questions**, still unanswered: shareable rule packs, how much cross-file analysis is worth it.
 
 ## Performance
 

@@ -98,8 +98,11 @@ Ours: simple declarative rules, deterministic results, agent-readable feedback, 
 - Weekly active repos and rules enforced per repo
 - Share of violations fixed by agents without human intervention
 
+## Decisions
+
+- **Fully open source for now.** No paid hosted layer or commercial edition is planned; revisit if a hosted dashboard (v1.0) becomes real. The license is not chosen yet and the repo has no LICENSE file.
+
 ## Open Questions
 
-- Open-source core with a paid hosted layer, or fully commercial?
 - Should rules be shareable as packs (e.g. "clean architecture", "NestJS conventions")?
 - How much cross-file analysis (call graphs, type info) is worth the complexity versus staying import- and syntax-level?
