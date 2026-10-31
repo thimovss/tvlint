@@ -188,3 +188,31 @@ scopes:
     assert!(stdout(&out).contains("1 file(s) skipped by prlint-ignore-file"), "{}", stdout(&out));
 }
 
+
+#[test]
+fn init_writes_a_valid_starter_config_and_never_overwrites() {
+    let project = Project::new("init", &[("app/models.py", "x = 1\n"), ("Cargo.toml", "[dependencies]\nserde = \"*\"\n")]);
+
+    let created = project.prlint(&["init"]);
+    assert_eq!(created.status.code(), Some(0), "{}", stdout(&created));
+    assert!(stdout(&created).contains("no-wall-clock-in-tests-python"));
+
+    assert_eq!(project.prlint(&["validate"]).status.code(), Some(0));
+    // The generated rules apply: Cargo.toml has a wildcard version.
+    let checked = project.prlint(&["check"]);
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(stdout(&checked).contains("no-wildcard-dependency-versions"));
+
+    let again = project.prlint(&["init"]);
+    assert_eq!(again.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("--force"));
+    assert_eq!(project.prlint(&["init", "--force"]).status.code(), Some(0));
+}
+
+#[test]
+fn init_in_a_project_without_code_writes_nothing() {
+    let project = Project::new("init-empty", &[("README.md", "hi\n")]);
+    let out = project.prlint(&["init"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!project.root.join("prlint.yaml").exists());
+}

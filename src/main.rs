@@ -2,6 +2,7 @@ mod adapter;
 mod check;
 mod config;
 mod data;
+mod init;
 mod scope;
 mod select;
 mod source;
@@ -55,6 +56,12 @@ enum Command {
     List,
     /// Check the config file for mistakes and explain every problem (exit 1 if invalid)
     Validate,
+    /// Create a starter prlint.yaml, with rules chosen for the languages found in the project
+    Init {
+        /// Overwrite the config file if it already exists
+        #[arg(long)]
+        force: bool,
+    },
     /// Print the JSON Schema of the config file, for editors and AI agents that write rules
     Schema,
 }
@@ -68,6 +75,7 @@ fn main() -> ExitCode {
         Command::Explain { rule } => explain(&cli.config, &rule).map(|()| 0),
         Command::List => list(&cli.config).map(|()| 0),
         Command::Validate => validate::run(&cli.config).map(|valid| u8::from(!valid)),
+        Command::Init { force } => init::run(&cli.config, force).map(|()| 0),
         Command::Schema => {
             print!("{SCHEMA}");
             Ok(0)

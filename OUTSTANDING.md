@@ -25,7 +25,6 @@ Done items are removed from this list.
 
 CLAUDE.md still describes a product that does not exist yet. Not built:
 
-- `lint check` / `lint init`, and `.lint/rules/`
 - JSON and SARIF output
 - a mandatory reason on suppressions (optional today)
 

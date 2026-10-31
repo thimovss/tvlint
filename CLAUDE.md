@@ -76,7 +76,7 @@ Ours: simple declarative rules, deterministic results, and agent-readable feedba
 ## Roadmap
 
 1. **MVP (8-10 weeks):** engine, four rule types, CLI, JS/TS + Python via the language adapter layer.
-2. **v0.2:** `lint init` that scaffolds starter rules, rule-hit analytics.
+2. **v0.2:** rule-hit analytics.
 3. **v0.3:** rule mining from the existing codebase ("92% of endpoints use X, 3 don't"), proposed as draft YAML.
 4. **v1.0:** optional LLM-evaluated rules (advisory by default, promotable to blocking), hosted dashboard, more languages.
 
