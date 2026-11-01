@@ -75,6 +75,20 @@ pub struct ClassMembers<'t> {
     pub fields: Vec<Member<'t>>,
 }
 
+/// One name a statement exposes to other files.
+pub struct Export<'t> {
+    /// The exported name as other files see it; for a default export of something that is not a plain name
+    /// (`export default memo(Foo)`), the expression as written; empty when the exported thing is anonymous.
+    pub name: String,
+    /// Whether it is the file's default export.
+    pub default: bool,
+    /// Whether the statement also declares what it exports (`export const Foo = 1`), as opposed to naming
+    /// something declared elsewhere (`export default Foo;`, `export { Foo }`).
+    pub declared: bool,
+    /// The statement.
+    pub node: Node<'t>,
+}
+
 pub trait Adapter: Sync {
     /// If `node` raises/throws an exception, the name of what is raised.
     fn raised_name(&self, node: Node, src: &str) -> Option<String>;
@@ -166,6 +180,12 @@ pub trait Adapter: Sync {
     /// If `node` defines a function or method, its name. Anonymous functions have none.
     fn function_name(&self, _node: Node, _src: &str) -> Option<String> {
         None
+    }
+
+    /// The values `node` exports, if it is an export statement. Type-only exports are left out. A statement
+    /// may export several (`export { a, b }`).
+    fn exports<'t>(&self, _node: Node<'t>, _src: &str) -> Vec<Export<'t>> {
+        Vec::new()
     }
 }
 

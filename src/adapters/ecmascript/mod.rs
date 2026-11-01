@@ -4,7 +4,7 @@ mod tsconfig;
 
 use tree_sitter::Node;
 
-use super::{Adapter, Assignment, ClassMembers, Comparison, ImportRef, Member, Property, first_named_child, last_segment, relative_path, text};
+use super::{Adapter, Assignment, ClassMembers, Comparison, Export, ImportRef, Member, Property, first_named_child, last_segment, relative_path, text};
 use crate::check::Project;
 
 pub use tsconfig::TsConfigs;
@@ -212,6 +212,66 @@ impl Adapter for EcmaScript {
             }
             _ => None,
         }
+    }
+
+    /// `export const a = 1, b = 2`, `export function F() {}`, `export default F;`, `export { A, B as C }` and
+    /// `export * from "m"`. Interfaces, type aliases and `export type { T }` are types, not values, and are left out.
+    fn exports<'t>(&self, node: Node<'t>, src: &str) -> Vec<Export<'t>> {
+        if node.kind() != "export_statement" {
+            return Vec::new();
+        }
+        let mut cursor = node.walk();
+        let tokens: Vec<&str> = node.children(&mut cursor).filter(|c| !c.is_named()).map(|c| c.kind()).collect();
+        if tokens.contains(&"type") {
+            return Vec::new();
+        }
+        let default = tokens.contains(&"default");
+        let export = |name: String, default: bool, declared: bool| Export { name, default, declared, node };
+        if let Some(declaration) = node.child_by_field_name("declaration") {
+            let names = match declaration.kind() {
+                "interface_declaration" | "type_alias_declaration" => return Vec::new(),
+                "lexical_declaration" | "variable_declaration" => {
+                    let mut cursor = declaration.walk();
+                    let names: Vec<String> = declaration
+                        .named_children(&mut cursor)
+                        .filter(|d| d.kind() == "variable_declarator")
+                        .filter_map(|d| d.child_by_field_name("name"))
+                        .filter(|n| n.kind() == "identifier")
+                        .map(|n| text(n, src).to_string())
+                        .collect();
+                    names
+                }
+                _ => vec![declaration.child_by_field_name("name").map(|n| text(n, src).to_string()).unwrap_or_default()],
+            };
+            return names.into_iter().map(|name| export(name, default, true)).collect();
+        }
+        if let Some(value) = node.child_by_field_name("value") {
+            let anonymous = matches!(value.kind(), "arrow_function" | "function_expression" | "function" | "generator_function" | "class");
+            return vec![if anonymous { export(String::new(), true, true) } else { export(text(value, src).to_string(), true, false) }];
+        }
+        let mut cursor = node.walk();
+        let mut out = Vec::new();
+        for child in node.named_children(&mut cursor) {
+            match child.kind() {
+                "export_clause" => {
+                    let mut inner = child.walk();
+                    for specifier in child.named_children(&mut inner).filter(|c| c.kind() == "export_specifier") {
+                        let Some(name) = specifier.child_by_field_name("name").map(|n| text(n, src).to_string()) else { continue };
+                        match specifier.child_by_field_name("alias").map(|a| text(a, src)) {
+                            Some("default") => out.push(export(name, true, false)),
+                            Some(alias) => out.push(export(alias.to_string(), false, false)),
+                            None => out.push(export(name, false, false)),
+                        }
+                    }
+                }
+                "namespace_export" => out.extend(first_named_child(child).map(|n| export(text(n, src).to_string(), false, false))),
+                _ => {}
+            }
+        }
+        if out.is_empty() && tokens.contains(&"*") {
+            out.push(export("*".to_string(), false, false));
+        }
+        out
     }
 
     fn array_elements<'t>(&self, node: Node<'t>) -> Option<Vec<Node<'t>>> {

@@ -390,3 +390,89 @@ pub(super) fn validate_shape_keys(rule: &Mapping, path: &str, checks: &mut usize
     }
 
 }
+
+/// Keys about what a file defines and exposes: function counts and exports.
+pub(super) fn validate_module_keys(rule: &Mapping, path: &str, languages: &[String], checks: &mut usize, report: &mut Report) {
+    let globs = |value: &Value, at: &str, report: &mut Report| {
+        for (i, pattern) in string_or_list(value, at, report).iter().enumerate() {
+            if let Err(err) = Glob::new(pattern) {
+                report.error(&format!("{at}[{i}]"), format!("invalid glob `{pattern}`: {}", err.kind()), None);
+            }
+        }
+    };
+    let flag = |map: &Mapping, key: &str, at: &str, report: &mut Report| match map.get(key) {
+        None | Some(Value::Bool(_)) => {}
+        Some(other) => report.error(&format!("{at}.{key}"), format!("expected true or false, found {}", describe(other)), None),
+    };
+    if let Some(value) = rule.get("max_functions") {
+        *checks += 1;
+        let at = format!("{path}.max_functions");
+        if let Some(map) = expect_mapping(value, &at, "a mapping like `{ names: \"[A-Z]*\", containing_element: \"*\", max: 1 }`", report) {
+            check_keys(
+                map,
+                &at,
+                &[
+                    ("names", "function name glob or list of globs; default every function"),
+                    ("containing_element", "JSX element name glob or list of globs; only functions containing one count (JS/TS)"),
+                    ("max", "required; the most such functions a file may define at its top level"),
+                ],
+                report,
+            );
+            for field in ["names", "containing_element"] {
+                if let Some(v) = map.get(field) {
+                    globs(v, &format!("{at}.{field}"), report);
+                }
+            }
+            match map.get("max") {
+                None => report.error(&at, "missing required key `max`", Some("write the most functions a file may have, e.g. `max: 1`".into())),
+                Some(v) if v.as_u64().is_some() => {}
+                Some(other) => report.error(&format!("{at}.max"), format!("expected a whole number, found {}", describe(other)), None),
+            }
+            if map.get("containing_element").is_some()
+                && let Some(language) = languages.iter().find(|l| !["javascript", "typescript"].contains(&l.as_str()))
+            {
+                report.error(&format!("{at}.containing_element"), format!("containing_element is not supported for {language}"), Some("elements exist in JavaScript and TypeScript".into()));
+            }
+        }
+    }
+    if let Some(value) = rule.get("forbid_export") {
+        *checks += 1;
+        let at = format!("{path}.forbid_export");
+        if let Some(map) = expect_mapping(value, &at, "a mapping like `{ names: \"[A-Z]*\", declared: true }`", report) {
+            check_keys(
+                map,
+                &at,
+                &[
+                    ("names", "exported name glob or list of globs; default every name"),
+                    ("declared", "true: only exports that declare what they export, like `export const Foo = 1` or `export default function Foo() {}`"),
+                    ("default", "true: only default exports; false: only named ones; default both"),
+                ],
+                report,
+            );
+            if let Some(v) = map.get("names") {
+                globs(v, &format!("{at}.names"), report);
+            }
+            flag(map, "declared", &at, report);
+            flag(map, "default", &at, report);
+        }
+    }
+    if let Some(value) = rule.get("require_export") {
+        *checks += 1;
+        let at = format!("{path}.require_export");
+        if let Some(map) = expect_mapping(value, &at, "a mapping like `{ default: true, names: \"[A-Z]*\" }`", report) {
+            check_keys(
+                map,
+                &at,
+                &[("names", "exported name glob or list of globs; default any name"), ("default", "true: the export must be the default export")],
+                report,
+            );
+            if let Some(v) = map.get("names") {
+                globs(v, &format!("{at}.names"), report);
+            }
+            flag(map, "default", &at, report);
+            if map.get("names").is_none() && map.get("default").is_none_or(|v| v.as_bool() != Some(true)) {
+                report.error(&at, "require_export asks for nothing", Some("add `default: true` or `names`".into()));
+            }
+        }
+    }
+}

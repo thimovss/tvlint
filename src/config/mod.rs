@@ -7,7 +7,7 @@ mod rule;
 pub use captures::{CapturePattern, fill as fill_placeholders};
 
 pub use language::Language;
-pub use rule::{ArgumentCheck, ClassFilter, Lookup, Rule, Use};
+pub use rule::{ArgumentCheck, ClassFilter, ForbidExport, Lookup, MaxFunctions, RequireExport, Rule, Use};
 #[cfg(test)]
 pub use rule::{AllowRaise, ArgumentKeys, ForbidLiteral};
 #[cfg(test)]
@@ -147,7 +147,7 @@ impl Config {
                 bail!("rule id `{id}` {problem}");
             }
             if !rule.has_code_checks() && rule.require_filename.is_empty() {
-                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, literal_assignment, max_lines, require_call, require_method, require_field, forbid_field, forbid_assignment, forbid_augmented_assignment, forbid_literal, require_argument, forbid_argument, argument_keys, allow_raise or require_filename)");
+                bail!("rule `{id}` has no checks (expected forbid_raise, forbid_call, forbid_catch, forbid_import, forbid_element, forbid_property, property_value, require_property, same_keys_as, literal_argument, literal_assignment, max_lines, require_call, require_method, require_field, forbid_field, forbid_assignment, forbid_augmented_assignment, forbid_literal, require_argument, forbid_argument, argument_keys, allow_raise, max_functions, forbid_export, require_export or require_filename)");
             }
             if rule.has_code_checks() && rule.language.is_empty() {
                 bail!("rule `{id}` needs `language` because it has code checks (forbid_raise, forbid_call, forbid_catch, forbid_import, ...)");
@@ -248,6 +248,12 @@ impl Config {
                 && (keys.calls.is_empty() || (keys.forbid_keys.is_empty() && keys.allow_keys.is_empty()))
             {
                 bail!("rule `{id}`: argument_keys needs `calls` and `forbid_keys` or `allow_keys`");
+            }
+            if let Some(max) = &rule.max_functions
+                && !max.containing_element.is_empty()
+                && let Some(language) = rule.language.iter().find(|l| !l.supports("forbid_element"))
+            {
+                bail!("rule `{id}`: max_functions.containing_element is not supported for {} (elements exist in JavaScript and TypeScript)", language.name());
             }
             if let Some(allow) = &rule.allow_raise
                 && allow.names.is_empty()

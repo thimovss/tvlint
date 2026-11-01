@@ -116,6 +116,12 @@ pub struct Rule {
     pub allow_raise: Option<AllowRaise>,
     /// String literals assigned to names must be listed in a data file and/or have a shape.
     pub literal_assignment: Option<LiteralArgument>,
+    /// A file may define at most so many functions of a kind, e.g. one React component.
+    pub max_functions: Option<MaxFunctions>,
+    /// Exports a file may not have.
+    pub forbid_export: Option<ForbidExport>,
+    /// An export every file must have.
+    pub require_export: Option<RequireExport>,
     /// Every matched file's name must match one of these globs.
     #[serde(default)]
     pub require_filename: Vec<String>,
@@ -248,6 +254,46 @@ pub struct AllowRaise {
     pub subclass_of: Option<String>,
 }
 
+/// At most `max` functions at the top level of a file whose name matches `names` and whose body uses one of
+/// `containing_element`. A React component is a capitalised function that contains JSX.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaxFunctions {
+    /// Function name globs. Default: every function.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+    /// Only functions that contain one of these JSX elements count, e.g. `*` for any element.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub containing_element: Vec<String>,
+    pub max: usize,
+}
+
+/// Exports that may not exist.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForbidExport {
+    /// Exported name globs. Default: every name.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+    /// Only exports that declare what they export (`export const Foo = 1`, `export default function Foo() {}`).
+    #[serde(default)]
+    pub declared: bool,
+    /// `true`: only default exports; `false`: only named ones. Default: both.
+    pub default: Option<bool>,
+}
+
+/// An export every file must have.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequireExport {
+    /// Exported name globs. Default: any name.
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub names: Vec<String>,
+    /// The export must be the default export.
+    #[serde(default)]
+    pub default: bool,
+}
+
 /// What a registry entry is called: the matched key, the matched scalar, or the scalar's full path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -354,6 +400,9 @@ impl Rule {
             ("argument_keys", self.argument_keys.is_some()),
             ("allow_raise", self.allow_raise.is_some()),
             ("literal_assignment", self.literal_assignment.is_some()),
+            ("max_functions", self.max_functions.is_some()),
+            ("forbid_export", self.forbid_export.is_some()),
+            ("require_export", self.require_export.is_some()),
             ("require_call", !self.require_call.is_empty()),
             ("require_method", !self.require_method.is_empty()),
             ("require_field", !self.require_field.is_empty()),
@@ -481,6 +530,26 @@ impl Rule {
             let mut parts = allow.names.clone();
             parts.extend(allow.subclass_of.iter().map(|c| format!("{c} and its subclasses")));
             out.push(format!("raising anything but {}", parts.join(", ")));
+        }
+        if let Some(max) = &self.max_functions {
+            let names = if max.names.is_empty() { "functions".to_string() } else { format!("functions named {}", max.names.join("/")) };
+            let inside = if max.containing_element.is_empty() { String::new() } else { format!(" containing {}", max.containing_element.join("/")) };
+            out.push(format!("more than {} {names}{inside} in a file", max.max));
+        }
+        if let Some(forbid) = &self.forbid_export {
+            let kind = match forbid.default {
+                Some(true) => "default exports",
+                Some(false) => "named exports",
+                None => "exports",
+            };
+            let declared = if forbid.declared { " that declare what they export" } else { "" };
+            let names = if forbid.names.is_empty() { String::new() } else { format!(" named {}", forbid.names.join("/")) };
+            out.push(format!("{kind}{names}{declared}"));
+        }
+        if let Some(require) = &self.require_export {
+            let kind = if require.default { "a default export" } else { "an export" };
+            let names = if require.names.is_empty() { String::new() } else { format!(" named {}", require.names.join("/")) };
+            out.push(format!("files without {kind}{names}"));
         }
         if !self.within_property.is_empty() {
             out.push(format!("(only inside a property named {})", self.within_property.join(", ")));

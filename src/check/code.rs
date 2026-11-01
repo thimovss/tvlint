@@ -67,6 +67,8 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
         .and_then(|allow| Some(ctx.index.subclasses_of(adapter.class_family()?, allow.subclass_of?)));
     let file_wide_call = !rule.require_call.is_empty() && rule.within_function.is_empty();
     let mut called = false;
+    let mut functions: Vec<(Node, String)> = Vec::new();
+    let mut exported = false;
     let mut report = |node: Node, message: String| {
         let pos = node.start_position();
         out.push(Violation {
@@ -81,6 +83,10 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
     visit(file.tree.root_node(), &mut |node| {
         structure::check_class(rule, adapter, node, src, class_scope.as_ref(), &mut report);
         structure::check_function(rule, adapter, node, src, &mut report);
+        if let Some(name) = structure::counted_function(rule, adapter, node, src) {
+            functions.push((node, name));
+        }
+        structure::check_exports(rule, adapter, node, src, &mut exported, &mut report);
         shape::check(rule, adapter, node, src, raise_classes.as_ref(), &mut report);
         if file_wide_call && !called {
             called = adapter.call_name(node, src).is_some_and(|callee| rule.require_call.is_match(&callee));
@@ -163,6 +169,9 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
         }
     });
 
+    if let Some(counted) = &rule.max_functions {
+        structure::report_excess(counted, &functions, &mut report);
+    }
     if file_wide_call && !called {
         out.push(Violation {
             path: file.path.clone(),
@@ -171,6 +180,11 @@ pub fn check_file_in_scope(file: &SourceFile, rule: &CompiledRule, ctx: &Project
             rule_id: rule.id.to_string(),
             message: format!("the file never calls {}", rule.rule.require_call.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")),
         });
+    }
+    if let Some(require) = &rule.require_export
+        && !exported
+    {
+        out.push(Violation { path: file.path.clone(), line: 1, column: 1, rule_id: rule.id.to_string(), message: structure::missing_export(require) });
     }
     if let Some(literal) = &rule.literal {
         let entries = literal.entries(ctx);
@@ -241,7 +255,7 @@ pub fn unused_registry_entries<'f>(
 }
 
 /// Depth-first walk over `node` and all its descendants.
-pub fn visit(node: Node, f: &mut impl FnMut(Node)) {
+pub fn visit<'t>(node: Node<'t>, f: &mut impl FnMut(Node<'t>)) {
     let mut cursor = node.walk();
     loop {
         f(cursor.node());

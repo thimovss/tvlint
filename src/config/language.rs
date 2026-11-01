@@ -86,7 +86,8 @@ impl Language {
             "forbid_assignment" | "forbid_augmented_assignment" | "forbid_literal" | "literal_assignment" | "argument_keys" => {
                 matches!(self, Python | JavaScript | TypeScript)
             }
-            "allow_raise" => matches!(self, Python | JavaScript | TypeScript),
+            "allow_raise" | "max_functions" => matches!(self, Python | JavaScript | TypeScript),
+            "forbid_export" | "require_export" => matches!(self, JavaScript | TypeScript),
             "require_argument" | "forbid_argument" => self == Python,
             _ => true,
         }
@@ -105,6 +106,8 @@ impl Language {
             (_, "forbid_assignment" | "forbid_augmented_assignment" | "forbid_literal" | "literal_assignment" | "argument_keys") => "assignments, comparisons and dict literals exist for Python, JavaScript and TypeScript",
             (_, "require_argument" | "forbid_argument") => "only Python has keyword arguments; for JavaScript and TypeScript use argument_keys on an options object",
             (Language::Rust | Language::Go | Language::Shell, "allow_raise") => "this language has no exceptions to allow",
+            (_, "forbid_export" | "require_export") => "only JavaScript and TypeScript have an export model so far",
+            (_, "max_functions") => "function checks exist for Python, JavaScript and TypeScript",
             (_, "within_function" | "except_function") => "function checks exist for Python, JavaScript and TypeScript",
             (Language::Rust, "forbid_raise") => {
                 "Rust has no exceptions; use forbid_call with panic!, unreachable!, \"*.unwrap\" or \"*.expect\""

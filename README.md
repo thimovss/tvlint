@@ -404,6 +404,31 @@ rules:
 - `require_call` counts calls anywhere in the function body, nested blocks and nested functions included. It does not follow calls into other functions.
 - A class is reported on its `class` line and a function on its `def` line, so `tvlint-ignore-next-line` goes above that line.
 
+## Definitions and exports
+
+Some rules are about how a file is organised: how many things it defines, and how it exposes them. Nothing here is specific to a framework. A React component is just a capitalised function that contains JSX.
+
+```yaml
+rules:
+  one-component-per-file:
+    language: [javascript, typescript]
+    max_functions: { names: "[A-Z]*", containing_element: "*", max: 1 }
+    rationale: A file with one component is easy to find and to test.
+    fix: Move the extra component into a file of its own.
+
+  components-use-default-export:
+    language: [javascript, typescript]
+    forbid_export: { names: "[A-Z]*", declared: true }   # no `export const Foo` or `export function Foo`
+    require_export: { default: true, names: "[A-Z]*" }   # but `export default Foo;` at the end
+    rationale: One way of exporting makes imports predictable.
+    fix: Declare the component, then write `export default ComponentName;`.
+```
+
+- **`max_functions`** counts functions at the top level of the file (not inside another function or class) whose name matches `names`, and, with `containing_element`, whose body contains a matching JSX element. The ones beyond `max` are reported, each on its own line.
+- **Exports** are read in JavaScript and TypeScript only. `export const a = 1, b = 2` exports two names, `export { A as B }` exports `B`, `export { A as default }` exports `A` as the default, and `export * from "m"` exports `*`. `export default` of something that is not a plain name (`export default memo(Foo)`) is named by the expression as written. `export interface` and `export type` are types and are left alone.
+- **`declared: true`** limits `forbid_export` to exports that declare what they export. `export default Foo;` and `export { Foo }` name something declared elsewhere and stay allowed.
+- Index files and tests that re-export are left out with the scope's `exclude`.
+
 ## Placeholders in import patterns
 
 `forbid_import` and `except_import` may use `{1}`, `{2}`, ... for what the wildcard segments of the scope's `include` pattern matched, in order. This lets one rule say "a package may import itself" instead of one scope for every package:
@@ -480,6 +505,9 @@ scopes:
 | `require_field` | Python, JavaScript and TypeScript. Field name globs that every selected class must declare in its own body: annotated or assigned names such as `x: int` or `x = 1` (a TypeScript `x: T` or a class field `x = 1`). |
 | `forbid_field` | Python, JavaScript and TypeScript. Field name globs that no selected class may declare. Reported at the field. |
 | `in_class` | Python, JavaScript and TypeScript. Which classes `require_method`, `require_field` and `forbid_field` check: `subclass_of: Name` (inheriting from it, directly or not; the class `Name` itself is left out) and/or `names: [globs]`. Without it, every class. |
+| `max_functions` | Python, JavaScript and TypeScript. `max`, and optionally `names` and `containing_element` (JavaScript and TypeScript): a file may define at most `max` top-level functions that match. Each one beyond the limit is reported. See [Definitions and exports](#definitions-and-exports). |
+| `forbid_export` | JavaScript and TypeScript. `names`, `declared: true` and `default: true` or `false`: exports that may not exist. |
+| `require_export` | JavaScript and TypeScript. `names` and/or `default: true`: every file in scope needs such an export, or is reported on line 1. |
 | `within_function` | Python, JavaScript and TypeScript. Function name globs. `forbid_call` and `forbid_raise` only count inside such a function (nested functions included), and `require_call` is checked per function instead of per file. |
 | `except_function` | Python, JavaScript and TypeScript. Function name globs that `within_function` leaves out, e.g. `_*`. Needs `within_function`. |
 | `max_lines` | Any language. The most lines a file may have (a positive whole number). A longer file is reported once, on the first line over the limit, with the file's total. `tvlint-ignore-file` skips it. |

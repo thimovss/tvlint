@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 
-use crate::config::{ClassFilter, Lookup, Rule, Use};
+use crate::config::{ClassFilter, ForbidExport, Lookup, MaxFunctions, RequireExport, Rule, Use};
 use crate::data::{PathPattern, Position};
 use super::Project;
 
@@ -40,6 +40,9 @@ pub struct CompiledRule<'a> {
     pub(super) forbid_argument: Option<CompiledArguments>,
     pub(super) argument_keys: Option<CompiledKeys>,
     pub(super) allow_raise: Option<CompiledAllowRaise<'a>>,
+    pub(super) max_functions: Option<CompiledFunctions<'a>>,
+    pub(super) forbid_export: Option<CompiledForbidExport<'a>>,
+    pub(super) require_export: Option<CompiledRequireExport<'a>>,
     pub(super) property: HashSet<&'a str>,
     pub(super) within: HashSet<&'a str>,
     pub(super) property_value: Option<CompiledPropertyValue<'a>>,
@@ -94,6 +97,22 @@ pub(super) struct CompiledKeys {
     pub(super) forbid: GlobSet,
     pub(super) allow: GlobSet,
     pub(super) allow_text: Vec<String>,
+}
+
+pub(super) struct CompiledFunctions<'a> {
+    pub(super) spec: &'a MaxFunctions,
+    pub(super) names: GlobSet,
+    pub(super) elements: GlobSet,
+}
+
+pub(super) struct CompiledForbidExport<'a> {
+    pub(super) spec: &'a ForbidExport,
+    pub(super) names: GlobSet,
+}
+
+pub(super) struct CompiledRequireExport<'a> {
+    pub(super) spec: &'a RequireExport,
+    pub(super) names: GlobSet,
 }
 
 pub(super) struct CompiledAllowRaise<'a> {
@@ -247,6 +266,32 @@ impl<'a> CompiledRule<'a> {
                 })
                 .transpose()
                 .with_context(|| format!("rule `{id}` allow_raise"))?,
+            max_functions: rule
+                .max_functions
+                .as_ref()
+                .map(|m| -> Result<CompiledFunctions> {
+                    // Without `names` every function counts.
+                    let names = if m.names.is_empty() { compile(&["*".to_string()])? } else { compile(&m.names)? };
+                    Ok(CompiledFunctions { spec: m, names, elements: compile(&m.containing_element)? })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` max_functions"))?,
+            forbid_export: rule
+                .forbid_export
+                .as_ref()
+                .map(|f| -> Result<CompiledForbidExport> {
+                    Ok(CompiledForbidExport { spec: f, names: compile(&if f.names.is_empty() { vec!["*".to_string()] } else { f.names.clone() })? })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` forbid_export"))?,
+            require_export: rule
+                .require_export
+                .as_ref()
+                .map(|r| -> Result<CompiledRequireExport> {
+                    Ok(CompiledRequireExport { spec: r, names: compile(&if r.names.is_empty() { vec!["*".to_string()] } else { r.names.clone() })? })
+                })
+                .transpose()
+                .with_context(|| format!("rule `{id}` require_export"))?,
             id,
             rule,
             base: String::new(),

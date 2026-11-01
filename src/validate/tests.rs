@@ -412,3 +412,19 @@ fn reports_statement_and_expression_rule_mistakes() {
     let found = rule_errors("    language: python\n    literal_argument: { calls: [f], pattern: a, lookup: suffix }\n");
     assert!(has(&found, "rules.r.literal_argument.lookup", "value or prefix"), "{found:?}");
 }
+
+#[test]
+fn module_keys_are_validated() {
+    assert!(rule_errors("    language: typescript\n    max_functions: { names: \"[A-Z]*\", containing_element: \"*\", max: 1 }\n").is_empty());
+    assert!(rule_errors("    language: typescript\n    forbid_export: { names: \"[A-Z]*\", declared: true }\n    require_export: { default: true }\n").is_empty());
+    let found = rule_errors("    language: typescript\n    max_functions: { names: \"[A-Z]*\" }\n");
+    assert!(has(&found, "rules.r.max_functions", "missing required key `max`"), "{found:?}");
+    let found = rule_errors("    language: python\n    max_functions: { containing_element: \"*\", max: 1 }\n");
+    assert!(has(&found, "rules.r.max_functions.containing_element", "not supported for python"), "{found:?}");
+    let found = rule_errors("    language: python\n    require_export: { default: true }\n");
+    assert!(has(&found, "rules.r.require_export", "not supported for python"), "{found:?}");
+    let found = rule_errors("    language: typescript\n    require_export: {}\n");
+    assert!(has(&found, "rules.r.require_export", "asks for nothing"), "{found:?}");
+    let found = rule_errors("    language: typescript\n    forbid_export: { declared: yes please }\n");
+    assert!(has(&found, "rules.r.forbid_export.declared", "expected true or false"), "{found:?}");
+}

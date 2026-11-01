@@ -255,6 +255,37 @@
         "subclass_of": { "description": "A class name: it and everything that inherits from it.", "$ref": "#/$defs/nonEmptyString" }
       }
     },
+    "maxFunctions": {
+      "description": "At most `max` top-level functions in a file whose name matches `names` and which contain one of the `containing_element` elements. A React component is a capitalised function that contains JSX.",
+      "type": "object",
+      "required": ["max"],
+      "additionalProperties": false,
+      "properties": {
+        "names": { "description": "Function name globs. Default: every function.", "$ref": "#/$defs/stringOrList" },
+        "containing_element": { "description": "JavaScript and TypeScript. Element name globs; only functions that contain such an element count, e.g. `*`.", "$ref": "#/$defs/stringOrList" },
+        "max": { "description": "The most such functions a file may define at its top level.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "forbidExport": {
+      "description": "JavaScript and TypeScript. Exports that must not exist. Types (`export interface`, `export type`) are not values and are left alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "names": { "description": "Exported name globs. Default: every name.", "$ref": "#/$defs/stringOrList" },
+        "declared": { "description": "Only exports that declare what they export: `export const Foo = 1`, `export default function Foo() {}`. `export default Foo;` and `export { Foo }` are left alone.", "type": "boolean" },
+        "default": { "description": "true: only default exports; false: only named ones. Default: both.", "type": "boolean" }
+      }
+    },
+    "requireExport": {
+      "description": "JavaScript and TypeScript. Every file in scope needs an export like this, reported on line 1 when it has none.",
+      "type": "object",
+      "anyOf": [{ "required": ["names"] }, { "required": ["default"] }],
+      "additionalProperties": false,
+      "properties": {
+        "names": { "description": "Exported name globs, e.g. `[A-Z]*`.", "$ref": "#/$defs/stringOrList" },
+        "default": { "description": "true: the export must be the default export.", "type": "boolean" }
+      }
+    },
     "literalAssignment": {
       "description": "Python, JavaScript, TypeScript. String literals assigned to names must be listed in a data file and/or have a shape.",
       "type": "object",
@@ -390,6 +421,9 @@
         "argument_keys": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/argumentKeys" },
         "allow_raise": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/allowRaise" },
         "literal_assignment": { "$ref": "#/$defs/literalAssignment" },
+        "max_functions": { "description": "Python, JavaScript, TypeScript.", "$ref": "#/$defs/maxFunctions" },
+        "forbid_export": { "description": "JavaScript, TypeScript.", "$ref": "#/$defs/forbidExport" },
+        "require_export": { "description": "JavaScript, TypeScript.", "$ref": "#/$defs/requireExport" },
         "require_call": {
           "description": "Python, JavaScript, TypeScript, Rust, Go, shell. Call patterns, as in `forbid_call`: one of them must appear in every file in scope, or in every function that `within_function` selects.",
           "$ref": "#/$defs/stringList"
@@ -456,6 +490,9 @@
         { "required": ["argument_keys"] },
         { "required": ["allow_raise"] },
         { "required": ["literal_assignment"] },
+        { "required": ["max_functions"] },
+        { "required": ["forbid_export"] },
+        { "required": ["require_export"] },
         { "required": ["require_filename"] }
       ],
 
@@ -514,7 +551,10 @@
               { "required": ["argument_keys"] },
               { "required": ["allow_raise"] },
               { "required": ["literal_assignment"] },
-                    { "required": ["require_call"] },
+              { "required": ["max_functions"] },
+              { "required": ["forbid_export"] },
+              { "required": ["require_export"] },
+              { "required": ["require_call"] },
               { "required": ["require_method"] },
               { "required": ["require_field"] },
               { "required": ["forbid_field"] },
@@ -546,6 +586,9 @@
         { "if": { "required": ["argument_keys"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         { "if": { "required": ["allow_raise"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         { "if": { "required": ["literal_assignment"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["max_functions"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
+        { "if": { "required": ["forbid_export"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
+        { "if": { "required": ["require_export"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyEcmaScript" } } } },
         { "if": { "required": ["require_call"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyCode" } } } },
         { "if": { "required": ["require_method"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },
         { "if": { "required": ["require_field"] }, "then": { "properties": { "language": { "$ref": "#/$defs/onlyClasses" } } } },

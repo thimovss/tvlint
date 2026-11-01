@@ -66,3 +66,5 @@ mod tests;
 mod structure_tests;
 #[cfg(test)]
 mod shape_tests;
+#[cfg(test)]
+mod module_tests;
